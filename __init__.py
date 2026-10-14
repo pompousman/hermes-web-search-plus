@@ -231,7 +231,12 @@ def _get_plugin_config_path() -> Path:
 
 def _get_hermes_config_path() -> Path:
     """Return the default Hermes config path inspected by the fast-path doctor."""
-    home = Path(os.environ.get("HERMES_HOME") or Path.home() / ".hermes")
+    try:
+        from hermes_constants import get_hermes_home
+    except ImportError:
+        home = Path(os.environ.get("HERMES_HOME") or Path.home() / ".hermes")
+    else:
+        home = Path(get_hermes_home())
     return Path(os.environ.get("HERMES_CONFIG") or home / "config.yaml")
 
 
@@ -309,25 +314,48 @@ def _hermes_web_settings(text: str) -> Dict[str, Any]:
         import yaml
     except ImportError:
         web: Dict[str, Any] = {}
+        # This fallback handles scalar web settings, not arbitrary YAML. Keep
+        # quoted strings as strings: YAML 1.1 'false' is truthy, unlike false.
+        scalar = r"(?:'[^']*(?:''[^']*)*'|\"(?:\\.|[^\"\\])*\"|[^,{}#\n]*)"
+        field = r"(backend|search_backend|extract_backend|keyless_rescue|keyless_fallback)"
+
+        def add(name: str, raw: str) -> None:
+            raw = raw.strip()
+            if raw.startswith(("'", '"')):
+                value = raw[1:-1]
+            elif raw in {"", "~", "null", "Null", "NULL"}:
+                value = None
+            elif raw in {"true", "True", "TRUE", "yes", "Yes", "YES", "on", "On", "ON"}:
+                value = True
+            elif raw in {"false", "False", "FALSE", "no", "No", "NO", "off", "Off", "OFF"}:
+                value = False
+            elif re.fullmatch(r"[-+]?0+(?:\.0+)?", raw):
+                value = 0
+            else:
+                value = raw
+            web[name] = value
+
+        flow = re.search(r"(?m)^web:\s*\{([^{}]*)\}", text)
+        if flow:
+            for match in re.finditer(rf"(?:^|,)\s*{field}:\s*({scalar})", flow[1]):
+                add(match[1], match[2])
+            return web
         in_web = False
+        child_indent = None
         for line in text.splitlines():
             if not line.strip() or line.lstrip().startswith("#"):
                 continue
             if not line[0].isspace():
                 in_web = bool(re.fullmatch(r"web:\s*(?:#.*)?", line))
+                child_indent = None
                 continue
             if in_web:
-                match = re.fullmatch(
-                    r"\s+(backend|search_backend|extract_backend):\s*['\"]?([a-z0-9_-]+)['\"]?\s*(?:#.*)?", line
-                )
-                if match:
-                    web[match[1]] = match[2]
-                match = re.fullmatch(
-                    r"\s+(keyless_rescue|keyless_fallback):\s*['\"]?(true|false|yes|no|on|off)['\"]?\s*(?:#.*)?",
-                    line, re.IGNORECASE,
-                )
-                if match:
-                    web[match[1]] = match[2].lower() in {"true", "yes", "on"}
+                indent = len(line) - len(line.lstrip())
+                if child_indent is None:
+                    child_indent = indent
+                match = re.fullmatch(rf"\s+{field}:\s*({scalar})\s*(?:#.*)?", line)
+                if indent == child_indent and match:
+                    add(match[1], match[2])
         return web
     try:
         data = yaml.safe_load(text)
