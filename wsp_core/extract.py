@@ -55,7 +55,7 @@ from .orchestrator_v3 import (
 )
 from .runtime_v3 import response_from_legacy
 from .state_store_v3 import SQLiteStateStore
-from .urls import canonical_url
+from .extract_match import match_extract_items
 
 
 EXTRACT_PROVIDER_PRIORITY = list(EXTRACT_PROVIDER_IDS)
@@ -378,29 +378,12 @@ def _extract_item_usable(item: Any) -> bool:
 def _match_extract_items(urls: List[str], items: List[Any]) -> List[Optional[Dict[str, Any]]]:
     """Pair provider result items with the requested URLs, one item per URL.
 
-    Exact URL first, then canonical URL, then the remaining items in order
-    (providers report redirect targets). URLs left without an item get None.
+    Exact URL first, then canonical URL, then the source URL the provider
+    reports (redirect targets, Firecrawl ``sourceURL``). An item with none of
+    these is never handed to a URL by position; URLs left without an item get
+    None and stay open for fallback.
     """
-    candidates = [item for item in items if isinstance(item, dict)]
-    matched: List[Optional[Dict[str, Any]]] = [None] * len(urls)
-    used = set()
-    for key in (str, canonical_url):
-        for position, url in enumerate(urls):
-            if matched[position] is not None:
-                continue
-            wanted = key(url)
-            if not wanted:
-                continue
-            for index, item in enumerate(candidates):
-                if index not in used and key(str(item.get("url") or "")) == wanted:
-                    matched[position] = item
-                    used.add(index)
-                    break
-    leftovers = [item for index, item in enumerate(candidates) if index not in used]
-    for position in range(len(urls)):
-        if matched[position] is None and leftovers:
-            matched[position] = leftovers.pop(0)
-    return matched
+    return match_extract_items(urls, items)[0]
 
 
 def _extract_error_item(url: str, error: str, item: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
@@ -564,6 +547,7 @@ def _execute_extract_v3(
     succeeded: Dict[int, Dict[str, Any]] = {}
     failed: Dict[int, Dict[str, Any]] = {}
     serving_providers = []
+    unmatched_results: List[Dict[str, Any]] = []
 
     for provider in plan.candidate_order:
         context = provider_attempt_context(
@@ -604,9 +588,20 @@ def _execute_extract_v3(
                 payload = attempted.payload
                 successful_provider = provider
             still_pending = []
-            for position, item in zip(
-                pending, _match_extract_items(batch, attempted.payload.get("results") or [])
-            ):
+            matched_items, unmatched_items = match_extract_items(
+                batch, attempted.payload.get("results") or []
+            )
+            # An item that answers no requested URL is not attributed to one
+            # by position: the URL stays open and the item is only noted.
+            unmatched_results.extend(
+                {
+                    "provider": provider,
+                    "url": str(item.get("url") or ""),
+                    "has_content": _extract_item_usable(item),
+                }
+                for item in unmatched_items
+            )
+            for position, item in zip(pending, matched_items):
                 if _extract_item_usable(item):
                     succeeded[position] = (provider, item)
                     if provider not in serving_providers:
@@ -640,32 +635,37 @@ def _execute_extract_v3(
         add_provider_setup_guidance(payload, "extract", list(plan.candidate_order), config,
                                     requested_provider=str(request.routing.get("provider") or "auto"))
     else:
-        if pending or len(serving_providers) > 1 or len(urls) < len(checked):
-            # Rebuild the result list in requested-URL order: content from
-            # whichever provider served each URL, error items for the rest.
-            merged = len(serving_providers) > 1
-            results = []
-            positions = iter(range(len(urls)))
-            for requested_url, _validated, error in checked:
-                if error is not None:
-                    results.append(_extract_error_item(requested_url, error))
-                    continue
-                position = next(positions)
-                if position in succeeded:
-                    provider, item = succeeded[position]
-                    if merged:
-                        # Ties each item to the attempt that produced it.
-                        item = {**item, "provider": provider}
-                else:
-                    item = failed.get(position) or _extract_error_item(urls[position], _EMPTY_EXTRACT_ERROR)
-                results.append(item)
-            payload = {**payload, "results": results}
-            if merged:
-                # The receipt names one selected provider: the last one the
-                # fallback reached. Earlier contributors are recorded as
-                # attempts with insufficient results.
-                successful_provider = serving_providers[-1]
-                payload["provider"] = successful_provider
+        # Rebuild the result list in requested-URL order, one entry per
+        # requested URL: content from whichever provider served it, error
+        # items for the rest. Providers may reorder, drop, rewrite or
+        # repeat URLs; the caller sees none of that.
+        merged = len(serving_providers) > 1
+        results = []
+        positions = iter(range(len(urls)))
+        for requested_url, _validated, error in checked:
+            if error is not None:
+                results.append(_extract_error_item(requested_url, error))
+                continue
+            position = next(positions)
+            if position in succeeded:
+                provider, item = succeeded[position]
+                if merged:
+                    # Ties each item to the attempt that produced it.
+                    item = {**item, "provider": provider}
+            else:
+                item = failed.get(position) or _extract_error_item(urls[position], _EMPTY_EXTRACT_ERROR)
+            results.append(item)
+        payload = {**payload, "results": results}
+        if pending and unmatched_results:
+            # Content a provider returned for no requested URL. It is not
+            # attributed to one; this note keeps it from vanishing silently.
+            payload["unmatched_results"] = unmatched_results
+        if merged:
+            # The receipt names one selected provider: the last one the
+            # fallback reached. Earlier contributors are recorded as
+            # attempts with insufficient results.
+            successful_provider = serving_providers[-1]
+            payload["provider"] = successful_provider
         # Failures after the selected provider (retrying leftover URLs) stay
         # in the attempt receipts; fallback_errors lists what preceded it.
         selected_index = plan.candidate_order.index(successful_provider)

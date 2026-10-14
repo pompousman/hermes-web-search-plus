@@ -22,6 +22,21 @@ from tools.web_tools import _load_web_config
 
 logger = logging.getLogger(__name__)
 
+try:  # package import (Hermes); the standalone unit-test load has no parent
+    from .wsp_core.extract_match import match_extract_items as _match_extract_items
+except ImportError:  # pragma: no cover - exercised only outside the package
+    _match_extract_items = None
+
+
+def _match_rows(urls: List[str], rows: List[Dict[str, Any]]) -> List[Optional[Dict[str, Any]]]:
+    """Pair engine rows with requested URLs (exact, canonical, reported source URL)."""
+    if _match_extract_items is not None:
+        return _match_extract_items(urls, rows)[0]
+    by_url: Dict[str, Dict[str, Any]] = {}
+    for row in rows:
+        by_url.setdefault(row["url"], row)
+    return [by_url.get(url) for url in urls]
+
 # WSP engine hard-cap (matches web_search_plus schema maximum).
 _WSP_MAX_RESULTS = 20
 
@@ -294,46 +309,53 @@ class WSPNativeBackend(WebSearchProvider):
         if not isinstance(results, list):
             return [{"url": url, "error": "WSP native extract returned no results"} for url in url_list]
 
-        # Bind every returned row to an explicitly requested URL. Never relabel
-        # unrelated content or silently drop requested failures.
-        by_url: Dict[str, Dict[str, Any]] = {}
-        for row in results:
-            if not isinstance(row, dict) or not isinstance(row.get("url"), str):
-                continue
-            url = row["url"]
-            if url not in url_list or url in by_url:
-                continue
-            content = row.get("content", row.get("markdown", ""))
-            if not isinstance(content, str):
-                by_url[url] = {"url": url, "error": "WSP native extract returned malformed content"}
-                continue
-            normalized = {"url": url, "content": content}
-            for key in ("title", "raw_content"):
-                if isinstance(row.get(key), str):
-                    normalized[key] = row[key]
-            if row.get("error"):
-                if str(row["error"]).startswith(_URL_REFUSED_PREFIX):
-                    by_url[url] = _refused_entry(url)
-                    continue
-                normalized["error"] = "WSP extraction failed for this URL"
-            metadata = {key: row[key] for key in (
-                "fetcher", "status", "quality", "lang", "source_type", "page_type",
-                "next_offset", "truncated", "original_content_length",
-            ) if key in row}
-            full_text = row.get("full_text")
-            if isinstance(full_text, dict) and full_text.get("truncated"):
-                # Content was cut to the context budget: say so, with the real
-                # length when known, instead of passing it off as the whole page.
-                metadata["truncated"] = True
-                if isinstance(full_text.get("original_chars"), int):
-                    metadata["original_content_length"] = full_text["original_chars"]
-                if full_text.get("stored") and full_text.get("path"):
-                    metadata["full_text_path"] = full_text["path"]
-            if metadata:
-                normalized["metadata"] = metadata
-            by_url[url] = normalized
-        return [by_url.get(url, {"url": url, "error": "WSP native extract returned no matching result"})
-                for url in url_list]
+        # Bind every returned row to an explicitly requested URL: exact, then
+        # normalised (canonical), then the source URL the provider reports.
+        # Never relabel unrelated content or silently drop requested failures;
+        # exactly one result per requested URL, in request order.
+        rows = [row for row in results if isinstance(row, dict) and isinstance(row.get("url"), str)]
+        matched = _match_rows(url_list, rows)
+        return [
+            self._normalize_row(url, row) if row is not None
+            else {"url": url, "error": "WSP native extract returned no matching result"}
+            for url, row in zip(url_list, matched)
+        ]
+
+    def _normalize_row(self, url: str, row: Dict[str, Any]) -> Dict[str, Any]:
+        # The result carries the requested URL: Hermes correlates by it, and a
+        # redirect target or punycode form would not match what was asked.
+        if row.get("error") and str(row["error"]).startswith(_URL_REFUSED_PREFIX):
+            # Refused by WSP's URL guard on purpose: Hermes must not rescue it.
+            return _refused_entry(url)
+        content = row.get("content", row.get("markdown", ""))
+        if not isinstance(content, str):
+            if not row.get("error"):
+                return {"url": url, "error": "WSP native extract returned malformed content"}
+            # An error row legitimately has no content (``content: None``);
+            # report its error, not a content-shape problem.
+            content = ""
+        normalized = {"url": url, "content": content}
+        for key in ("title", "raw_content"):
+            if isinstance(row.get(key), str):
+                normalized[key] = row[key]
+        metadata = {key: row[key] for key in (
+            "fetcher", "status", "quality", "lang", "source_type", "page_type",
+            "next_offset", "truncated", "original_content_length",
+        ) if key in row}
+        full_text = row.get("full_text")
+        if isinstance(full_text, dict) and full_text.get("truncated"):
+            # Content was cut to the context budget: say so, with the real
+            # length when known, instead of passing it off as the whole page.
+            metadata["truncated"] = True
+            if isinstance(full_text.get("original_chars"), int):
+                metadata["original_content_length"] = full_text["original_chars"]
+            if full_text.get("stored") and full_text.get("path"):
+                metadata["full_text_path"] = full_text["path"]
+        if row.get("error"):
+            normalized["error"] = "WSP extraction failed for this URL"
+        if metadata:
+            normalized["metadata"] = metadata
+        return normalized
 
     def get_setup_schema(self) -> Dict[str, Any]:
         return {
