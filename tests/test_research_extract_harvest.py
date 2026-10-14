@@ -1,5 +1,6 @@
 """Deterministic deadline/harvest races through the native research path."""
 
+import math
 import time
 from concurrent.futures import TimeoutError as FuturesTimeoutError
 from types import SimpleNamespace
@@ -38,7 +39,10 @@ def test_research_harvest_grace_still_bounds_stuck_extraction(tmp_path, monkeypa
 
 
 def _run_deadline_race(tmp_path, monkeypatch, budget, finalization_seconds):
-    clock = SimpleNamespace(value=time.monotonic())
+    # Start on a whole second just ahead of the real clock: parts of the
+    # engine still read the real monotonic clock, and a fractional start can
+    # round (start + 20.0) - start down to 19 999 ms.
+    clock = SimpleNamespace(value=float(math.ceil(time.monotonic()) + 1))
     clock_module = SimpleNamespace(monotonic=lambda: clock.value)
     calls = []
     member_deadlines = []
