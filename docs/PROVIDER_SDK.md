@@ -51,14 +51,15 @@ that module. Startup diagnostics intentionally contain stable module names and
 codes, not file paths or upstream error text.
 
 `ProviderConfigError`, `ProviderRequestError`, `ProviderContractFailure`,
-`ProviderRegistrationError`, `ProviderDiscoveryError`, and
-`DuplicateProviderError` are the typed SDK errors providers may use.
+`ProviderRegistrationError`, `ProviderDiscoveryError`,
+`DuplicateProviderError`, and `RequestDeadlineExceeded` are the typed SDK
+errors providers may use.
 `wsp_sdk.conformance` runs the shared metadata,
 formal-dispatch, source-envelope, keyless, and missing-key checks over every
 built-in and discovered spec without making network requests.
 
 A provider with its own transport (not `wsp_core.http_client`) calls
-`dispatch_timeout(seconds)` right before each request: it returns the socket
+`dispatch_timeout(timeout)` right before each request: it returns the socket
 timeout reduced to the engine's per-attempt cap and the time left until the
 request deadline, and raises `RequestDeadlineExceeded` (a timeout-class
 `ProviderRequestError`) once that deadline has passed. A provider that makes

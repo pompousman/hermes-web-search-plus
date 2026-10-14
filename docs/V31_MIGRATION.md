@@ -48,7 +48,7 @@ Kill switches (environment, always win over config):
 ## Verifying the upgrade
 
 ```bash
-python3 setup.py status          # provider surface must still show 12 search / 8 extract
+hermes web-search-plus status    # provider surface must still show 12 search / 8 extract
 python3 -m wsp_core.ui --port 8765        # Console: /api/v3/overview must render
 python3 -m pytest tests -q       # if you run from a checkout
 ```
