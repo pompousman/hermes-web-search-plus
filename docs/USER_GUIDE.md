@@ -244,7 +244,7 @@ Budget preflight is opt-in. Before a native v3 request starts any provider attem
 }
 ```
 
-Set a limit to `null` to leave that dimension unbounded. With `on_exceed: "degrade"`, WSP deterministically applies the smallest compatible cap; with `"abort"`, it returns a typed budget failure before a provider call. Daily usage is checked and recorded in the existing local v3 `budget_ledger`; an unavailable ledger fails closed when a daily quota is enabled. The receipt endpoint includes the typed checks and any reduction or abort reason. Set `WSP_BUDGET_PREFLIGHT_OFF=1` for an emergency process-level override; `0`, `false`, `no`, and `off` leave configured preflight enabled.
+Set a limit to `null` to leave that dimension unbounded. With `on_exceed: "degrade"`, WSP deterministically applies the smallest compatible cap; with `"abort"`, it returns a typed budget failure before a provider call. Daily usage is checked and recorded in the existing local v3 `budget_ledger`; an unavailable ledger fails closed when a daily quota is enabled. The per-request attempt cap (`max_provider_attempts`) lives in memory and stays enforced even when the state database is unavailable. The receipt endpoint includes the typed checks and any reduction or abort reason. Set `WSP_BUDGET_PREFLIGHT_OFF=1` for an emergency process-level override; `0`, `false`, `no`, and `off` leave configured preflight enabled.
 
 ### GroktoCrawl / local Firecrawl-compatible backends
 

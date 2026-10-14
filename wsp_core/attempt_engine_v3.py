@@ -287,28 +287,30 @@ class AttemptEngine:
                     budget_decision="not_reserved",
                 )
 
-            reserved = decision.store_available
-            budget_decision = "reserved" if reserved else "store_unavailable"
+            # The per-request budget lives in memory and is enforced even when
+            # SQLite is down.  Budgets that need the ledger (a non-request
+            # window such as the daily provider-call limit) fail closed when the
+            # store cannot be read: an unverifiable limit blocks the call
+            # instead of allowing unlimited paid operations.
+            budget_decision = "reserved" if decision.store_available else "store_unavailable"
             daily_reserved = False
-            if reserved:
-                budget_allowed = self.store.reserve_budget(
-                    context.budget_scope,
-                    context.budget_window,
-                    units=context.budget_units,
+            budget_allowed = self.store.reserve_budget(
+                context.budget_scope,
+                context.budget_window,
+                units=context.budget_units,
+            )
+            if not budget_allowed:
+                return self._skipped(
+                    context,
+                    started=started,
+                    retry_count=index,
+                    state=decision.circuit_state,
+                    reason=SkipReason.BUDGET_BLOCKED,
+                    budget_decision=(
+                        "blocked" if self.store.available else "store_unavailable"
+                    ),
                 )
-                if not budget_allowed and self.store.available:
-                    return self._skipped(
-                        context,
-                        started=started,
-                        retry_count=index,
-                        state=decision.circuit_state,
-                        reason=SkipReason.BUDGET_BLOCKED,
-                        budget_decision="blocked",
-                    )
-                if not budget_allowed:
-                    reserved = False
-                    budget_decision = "store_unavailable"
-            if reserved and context.daily_budget_scope is not None:
+            if context.daily_budget_scope is not None:
                 self.store.configure_budget(
                     context.daily_budget_scope,
                     context.daily_budget_window or "",
@@ -342,14 +344,13 @@ class AttemptEngine:
             try:
                 payload = operation()
             except BaseException as exc:
-                if reserved:
-                    reconciled = self.store.commit_budget(
-                        context.budget_scope,
-                        context.budget_window,
-                        units=context.budget_units,
-                    )
-                    if not reconciled:
-                        budget_decision = "store_unavailable"
+                reconciled = self.store.commit_budget(
+                    context.budget_scope,
+                    context.budget_window,
+                    units=context.budget_units,
+                )
+                if not reconciled:
+                    budget_decision = "store_unavailable"
                 if daily_reserved:
                     reconciled_daily = self.store.commit_budget(
                         context.daily_budget_scope or "",
@@ -418,14 +419,13 @@ class AttemptEngine:
                     ),
                 )
 
-            if reserved:
-                reconciled = self.store.commit_budget(
-                    context.budget_scope,
-                    context.budget_window,
-                    units=context.budget_units,
-                )
-                if not reconciled:
-                    budget_decision = "store_unavailable"
+            reconciled = self.store.commit_budget(
+                context.budget_scope,
+                context.budget_window,
+                units=context.budget_units,
+            )
+            if not reconciled:
+                budget_decision = "store_unavailable"
             if daily_reserved:
                 reconciled_daily = self.store.commit_budget(
                     context.daily_budget_scope or "",

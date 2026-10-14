@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import dataclasses
+
 from wsp_core.contract_v3 import (
     AttemptOutcome,
     Capability,
@@ -154,26 +156,98 @@ def test_store_loss_after_reservation_never_discards_provider_outcome(tmp_path):
     assert failed.receipt.error.error_class is ErrorClass.TRANSIENT
 
 
-def test_store_loss_during_budget_reservation_does_not_skip_provider(
-    tmp_path, monkeypatch
-):
+def _daily_context(**changes) -> AttemptContext:
+    return dataclasses.replace(
+        _context(),
+        daily_budget_scope="daily_provider_calls",
+        daily_budget_window="2026-10-14",
+        daily_budget_limit_units=100,
+        **changes,
+    )
+
+
+def test_store_loss_during_daily_reservation_fails_closed(tmp_path, monkeypatch):
     store = SQLiteStateStore(tmp_path / "state.sqlite3")
     engine = AttemptEngine(store, max_attempts=1)
     calls = []
 
-    def fail_reservation(*_args, **_kwargs):
+    real_reserve = store.reserve_budget
+
+    def fail_daily_reservation(scope, window, *, units):
+        if window == "request":
+            return real_reserve(scope, window, units=units)
         store._available = False
         return False
 
-    monkeypatch.setattr(store, "reserve_budget", fail_reservation)
+    monkeypatch.setattr(store, "reserve_budget", fail_daily_reservation)
     execution = engine.execute(
-        _context(),
+        _daily_context(),
         lambda: calls.append("called") or {"results": []},
         now=lambda: 100,
     )
 
-    assert calls == ["called"]
-    assert execution.receipt.outcome is AttemptOutcome.SUCCESS
+    assert calls == []
+    assert execution.receipt.outcome is AttemptOutcome.SKIPPED
+    assert execution.receipt.skip_reason is SkipReason.BUDGET_BLOCKED
+    assert execution.receipt.budget_decision == "store_unavailable"
+    # The released request reservation must not leak.
+    assert store.get_budget("request-1", "request").reserved_units == 0
+
+
+def test_request_budget_is_enforced_without_state_store(tmp_path):
+    store = SQLiteStateStore(tmp_path / "state.sqlite3")
+    store._available = False
+    engine = AttemptEngine(store, max_attempts=1)
+    context = _context(budget_limit_units=1)
+    calls = []
+
+    executions = [
+        engine.execute(
+            context, lambda: calls.append("called") or {"results": []}, now=lambda: 100
+        )
+        for _ in range(4)
+    ]
+
+    assert len(calls) == 1
+    assert executions[0].receipt.outcome is AttemptOutcome.SUCCESS
+    assert executions[0].receipt.budget_decision == "store_unavailable"
+    for blocked in executions[1:]:
+        assert blocked.receipt.outcome is AttemptOutcome.SKIPPED
+        assert blocked.receipt.skip_reason is SkipReason.BUDGET_BLOCKED
+    assert store.get_budget("request-1", "request").used_units == 1
+
+
+def test_request_budget_is_enforced_with_corrupt_state_file(tmp_path):
+    path = tmp_path / "state.sqlite3"
+    path.write_bytes(b"corrupt")
+    store = SQLiteStateStore(path)
+    assert not store.available
+    engine = AttemptEngine(store, max_attempts=1)
+    context = _context(budget_limit_units=2)
+    calls = []
+
+    for _ in range(5):
+        engine.execute(
+            context, lambda: calls.append("called") or {"results": []}, now=lambda: 100
+        )
+
+    assert len(calls) == 2
+
+
+def test_daily_budget_fails_closed_without_state_store(tmp_path):
+    path = tmp_path / "state.sqlite3"
+    path.write_bytes(b"corrupt")
+    engine = AttemptEngine(SQLiteStateStore(path), max_attempts=1)
+    calls = []
+
+    execution = engine.execute(
+        _daily_context(),
+        lambda: calls.append("called") or {"results": []},
+        now=lambda: 100,
+    )
+
+    assert calls == []
+    assert execution.receipt.skip_reason is SkipReason.BUDGET_BLOCKED
     assert execution.receipt.budget_decision == "store_unavailable"
 
 
