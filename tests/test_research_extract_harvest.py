@@ -1,6 +1,7 @@
 """Deterministic deadline/harvest races through the native research path."""
 
 import time
+from concurrent.futures import TimeoutError as FuturesTimeoutError
 from types import SimpleNamespace
 
 import pytest
@@ -58,7 +59,9 @@ def _run_deadline_race(tmp_path, monkeypatch, budget, finalization_seconds):
 
         def result(self, timeout=None):
             if timeout is not None and self.elapsed > timeout:
-                raise TimeoutError("daemon task did not finish in time")
+                # Match DaemonTask: concurrent.futures.TimeoutError is only an
+                # alias of the builtin TimeoutError from Python 3.11 on.
+                raise FuturesTimeoutError("daemon task did not finish in time")
             return self.payload
 
     def fake_search(**_kwargs):
