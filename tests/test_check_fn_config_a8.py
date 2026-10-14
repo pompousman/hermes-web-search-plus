@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import socket
+import sys
 
 import pytest
 
@@ -37,6 +38,11 @@ class FakeCtx:
 def config_path(tmp_path, monkeypatch):
     """Point the engine at an isolated config.json with no env keys set."""
     path = tmp_path / "config.json"
+    # These tests cover hosts without Hermes, where config.json keys still count
+    # (under Hermes they are ignored, see test_file_credentials_511). A Hermes venv
+    # has the real agent.secret_scope importable, so block it explicitly.
+    monkeypatch.setitem(sys.modules, "agent", None)
+    monkeypatch.setitem(sys.modules, "agent.secret_scope", None)
     monkeypatch.setenv("WEB_SEARCH_PLUS_CONFIG", str(path))
     for key in (*wsp._PROVIDER_ENV_KEYS, "SEARXNG_INSTANCE_URL", "SEARXNG_ALLOW_PRIVATE"):
         monkeypatch.delenv(key, raising=False)

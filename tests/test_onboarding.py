@@ -1177,6 +1177,9 @@ def test_starter_setup_with_a_search_key_in_the_process_environment_does_not_off
     ids=["keenable-key", "searxng-url", "keyless-already-on"],
 )
 def test_starter_setup_with_a_search_provider_in_the_config_does_not_offer_keyless(tmp_path, monkeypatch, config_text):
+    # Host without Hermes: a key in config.json counts there (Hermes ignores it).
+    monkeypatch.setitem(sys.modules, "agent", None)
+    monkeypatch.setitem(sys.modules, "agent.secret_scope", None)
     env_path, config_path, prompts = _run_starter_setup(tmp_path, monkeypatch, tty=True, answer="y", config_text=config_text)
 
     assert not any("Keenable" in prompt for prompt in prompts)
