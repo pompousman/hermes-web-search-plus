@@ -530,10 +530,18 @@ def response_from_legacy(
         for attempt in provider_attempts:
             if attempt.outcome is not AttemptOutcome.SUCCESS:
                 continue
+            # Failed or preflight-refused URLs have no serving provider;
+            # anchor their slots to the selected attempt instead of dropping them.
             provider_slots = [
                 (slot, item)
                 for slot, item in enumerate(observation_items)
                 if str(item.get("provider") or "") == attempt.provider
+                or (
+                    multi_source_extract
+                    and not item.get("provider")
+                    and item.get("error")
+                    and attempt is successful_attempt
+                )
             ]
             if provider_slots:
                 made = observations_from_legacy(
