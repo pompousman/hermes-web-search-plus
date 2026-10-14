@@ -2,6 +2,22 @@
 
 ## [Unreleased]
 
+### Security
+
+- Under Hermes, `api_key`/`apiKey` in `config.json` is ignored; provider keys come only from the active Hermes profile (`hermes config set <PROVIDER>_API_KEY …`). A warning is logged once, and `hermes web-search-plus status` and `setup` name the affected provider without showing the value. MCP, OpenClaw and the standalone CLI are unchanged.
+- `status --json`, `config show --json`, `config … --dry-run` and the status routing block show secret fields only as `set` or `not set`.
+- The native `wsp` backend marks URLs it refused on purpose (private or internal addresses, blocked names, unresolvable hosts) with Hermes' `blocked_by_policy`, so Hermes' keyless rescue does not forward them to third-party services. `hermes web-search-plus status` and `setup.py fastpath` show whether the native backend is selected and whether Hermes' `web.keyless_rescue` is on, with the command to turn it off. `docs/NATIVE_BACKEND.md` explains the rescue, including that failed searches are always eligible for it.
+
+### Fixed
+
+- No provider request starts after the request deadline. Batch extraction (Firecrawl, Linkup, Serper, Keenable, DonSeTch) keeps pages it already fetched and marks the rest `not tried: request ran out of time`; socket timeouts shrink to the time left. Octen, TinyFish and DonSeTch respect the per-attempt timeout cap. Research passes its deadline to every member and to its source extraction.
+- Brave's per-second 429 retry moved from the adapter to the attempt engine, so it respects the deadline and shows as its own try in receipts. With automatic routing a Brave 429 now falls back to the next provider instead of waiting inside the adapter.
+- The per-request provider-attempt budget is enforced even when the SQLite state store is unavailable; a configured daily provider-call limit fails closed when the ledger cannot be read. The state store re-probes SQLite 30 s after an I/O error instead of staying disabled.
+- A budget-blocked call returns its half-open probe lease; a half-open retry no longer blocks itself; a retry stopped after a paid try keeps that try in the receipt as failed; the last-resort probe keeps the circuit's failure history until the probe succeeds.
+- Extract returns exactly one result per requested URL, in request order. URLs that share a canonical form (`?ref=1` / `?ref=2`) are no longer collapsed, a result that cannot be matched to a requested URL is no longer assigned to the first open one (the URL stays open for fallback), and the native backend matches rewritten URLs (trailing slash, IDN, redirect with `sourceURL`) instead of reporting "no matching result".
+- `web_extract_plus` accepts provider names in any letter case; unknown or search-only names return a clean error.
+- The test suite runs from any checkout directory name.
+
 ## [v5.1.0] — 2026-10-12
 
 ### Breaking changes
