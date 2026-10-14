@@ -16,6 +16,7 @@ pre-compact structured shape so 3.2.x binaries keep working.
 
 from __future__ import annotations
 
+import importlib
 import json
 import os
 import re
@@ -27,7 +28,7 @@ import time
 from typing import Any
 from urllib.parse import urlsplit
 
-from wsp_core.credentials import file_credentials_allowed, get_secret
+import wsp_sdk
 from wsp_sdk import (
     ProviderSpec,
     RequestDeadlineExceeded,
@@ -42,6 +43,26 @@ _ALLOWED_OUTPUT_FORMATS = {"markdown"}
 _ALLOWED_SEARCH_TYPES = {"search", "news"}
 _ALLOWED_INTENTS = {"auto", "web", "code", "paper", "news", "entity"}
 TESTED_VERSION = "4.7.0"
+
+
+def _engine_credentials():
+    """The credentials module of the engine that loaded this provider.
+
+    Hermes imports the plugin as ``hermes_plugins.<slug>``, so ``wsp_core`` is
+    not a top-level module there and ``import wsp_core.credentials`` fails the
+    whole provider file. ``wsp_sdk`` is bound to the loading engine's SDK
+    (``<engine>.sdk``); its sibling module holds the active secret resolver.
+    """
+    engine = wsp_sdk.__name__.rpartition(".")[0] or "wsp_core"
+    return importlib.import_module(engine + ".credentials")
+
+
+def file_credentials_allowed() -> bool:
+    return _engine_credentials().file_credentials_allowed()
+
+
+def get_secret(name: str, default: str | None = None) -> str | None:
+    return _engine_credentials().get_secret(name, default)
 STDERR_LIMIT = 2048
 _VERSION_RE = re.compile(r"(\d+)\.(\d+)\.(\d+)")
 _SECRET_RE = re.compile(

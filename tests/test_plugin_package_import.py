@@ -62,6 +62,8 @@ print(json.dumps({
     "sys_path_unchanged": sys.path == path_before,
     "wsp_sdk_is_package_sdk": sys.modules.get("wsp_sdk") is sdk,
     "sdk_provider_uses_package_classes": octen is not None and isinstance(octen, sdk.ProviderSpec),
+    "startup_diagnostics": sorted(d.module for d in registry.startup_diagnostics()),
+    "donsetch_registered": "donsetch" in registry.PROVIDER_SPECS,
 }))
 '''
 
@@ -105,3 +107,13 @@ def test_providers_d_modules_get_the_sdk_of_this_engine(tmp_path):
 
     assert result["wsp_sdk_is_package_sdk"] is True
     assert result["sdk_provider_uses_package_classes"] is True
+
+
+def test_every_bundled_provider_loads_under_the_hermes_package_name(tmp_path):
+    # Under Hermes the engine is ``hermes_plugins.<slug>.wsp_core``; a provider
+    # file that imports top-level ``wsp_core`` fails to load and silently
+    # drops out of the catalog (DonSeTch did, between 5.1.0 and 5.1.1).
+    result = _probe(tmp_path)
+
+    assert result["startup_diagnostics"] == []
+    assert result["donsetch_registered"] is True
