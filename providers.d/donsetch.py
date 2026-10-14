@@ -27,6 +27,7 @@ import time
 from typing import Any
 from urllib.parse import urlsplit
 
+from wsp_core.credentials import file_credentials_allowed, get_secret
 from wsp_sdk import (
     ProviderSpec,
     RequestDeadlineExceeded,
@@ -142,7 +143,9 @@ def _candidate_binary(key: str | None, config: dict[str, Any]) -> str:
     section = config.get("donsetch", {}) if isinstance(config, dict) else {}
     if not isinstance(section, dict):
         section = {}
-    candidate = key or section.get("binary") or section.get("api_key")
+    candidate = key or section.get("binary")
+    if not candidate and file_credentials_allowed():
+        candidate = section.get("api_key")
     if not isinstance(candidate, str) or not candidate.strip():
         return shutil.which("donsetch") or ""
     candidate = candidate.strip()
@@ -260,8 +263,16 @@ def _child_env() -> dict[str, str]:
     env = {
         key: value
         for key, value in os.environ.items()
-        if key in _CHILD_ENV_ALLOWLIST or key.startswith("LC_") or key.startswith("DONSETCH_")
+        if key in _CHILD_ENV_ALLOWLIST or key.startswith("LC_")
     }
+    # The resolver has no enumeration API. Discover extension names from the
+    # process, but read their values only from the active scope (never fallback).
+    names = {name for name in os.environ if name.startswith("DONSETCH_")}
+    names.add("DONSETCH_BIN")
+    for name in names:
+        value = get_secret(name)
+        if value is not None:
+            env[name] = value
     env["DONSETCH_TRANSPORT"] = "stdio"
     return env
 
