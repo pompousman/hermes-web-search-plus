@@ -400,3 +400,50 @@ def test_budget_block_does_not_waste_the_half_open_lease(tmp_path):
     assert calls == ["probe"]
     assert probe.receipt.outcome is AttemptOutcome.SUCCESS
     assert probe.receipt.circuit_state_before is CircuitState.HALF_OPEN
+
+
+def test_half_open_retry_runs_under_its_own_lease_and_reports_both_tries(tmp_path):
+    store = SQLiteStateStore(tmp_path / "state.sqlite3")
+    engine = AttemptEngine(store, max_attempts=2, sleep=lambda _seconds: None)
+    context = _context()
+    store.record_failure(
+        context.circuit_key, ErrorClass.RATE_LIMIT, now=100, retry_after_seconds=1
+    )
+    calls = []
+
+    def rate_limited():
+        calls.append(1)
+        raise ProviderRequestError("429", status_code=429, retry_after=1)
+
+    execution = engine.execute(context, rate_limited, now=lambda: 102)
+
+    assert len(calls) == 2
+    assert execution.receipt.outcome is AttemptOutcome.FAILED
+    assert execution.receipt.decision == "attempted"
+    assert [t["outcome"] for t in execution.receipt.tries] == ["error", "error"]
+    assert execution.receipt.retry_count == 1
+    assert execution.receipt.error.error_class is ErrorClass.RATE_LIMIT
+    assert store.get_circuit(context.circuit_key, ErrorClass.RATE_LIMIT).state in {
+        CircuitState.OPEN,
+        CircuitState.BLOCKED_QUOTA,
+    }
+
+
+def test_retry_blocked_by_budget_keeps_the_paid_try_in_the_receipt(tmp_path):
+    store = SQLiteStateStore(tmp_path / "state.sqlite3")
+    engine = AttemptEngine(store, max_attempts=3, sleep=lambda _seconds: None)
+    calls = []
+
+    def flaky():
+        calls.append(1)
+        raise ProviderRequestError("upstream", status_code=503, transient=True)
+
+    execution = engine.execute(_context(budget_limit_units=1), flaky, now=lambda: 100)
+
+    assert len(calls) == 1
+    assert execution.receipt.outcome is AttemptOutcome.FAILED
+    assert execution.receipt.decision == "attempted"
+    assert len(execution.receipt.tries) == 1
+    assert execution.receipt.tries[0]["outcome"] == "error"
+    assert execution.receipt.error.error_class is ErrorClass.TRANSIENT
+    assert execution.receipt.budget_decision == "blocked"
