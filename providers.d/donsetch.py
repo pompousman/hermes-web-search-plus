@@ -838,7 +838,7 @@ def _fetch_failure(structured: dict[str, Any], url: str, status: int) -> dict[st
 def _project_fetch_item(payload: dict[str, Any], fallback_url: str) -> dict[str, Any]:
     structured = payload.get("structured")
     if not isinstance(structured, dict):
-        return {"url": fallback_url, "error": "donsetch_fetch_contract_failed", "status": 0}
+        return {"url": fallback_url, "requested_url": fallback_url, "error": "donsetch_fetch_contract_failed", "status": 0}
     debug = _whitelist_fetch_debug(payload.get("meta") or {})
     observed_url = structured.get("url")
     url = observed_url if isinstance(observed_url, str) and observed_url else fallback_url
@@ -865,9 +865,10 @@ def _project_fetch_item(payload: dict[str, Any], fallback_url: str) -> dict[str,
         or status >= 400
         or not content.strip()
     ):
-        return _fetch_failure(structured, url, status)
+        return {**_fetch_failure(structured, url, status), "requested_url": fallback_url}
     return source_result(
         url,
+        requested_url=fallback_url,
         title=title,
         content=content,
         images=[],
@@ -924,7 +925,7 @@ def execute_extract(
                 if deadline_passed():
                     # Fetched pages are kept; no new fetch after the deadline.
                     projected.append(
-                        {"url": requested_url, "error": str(RequestDeadlineExceeded()), "status": 0}
+                        {"url": requested_url, "requested_url": requested_url, "error": str(RequestDeadlineExceeded()), "status": 0}
                     )
                     continue
                 try:
@@ -940,9 +941,9 @@ def execute_extract(
                 except TimeoutError:
                     if not any(not item.get("error") for item in projected):
                         raise
-                    projected.append({"url": requested_url, "error": "donsetch_timeout", "status": 0})
+                    projected.append({"url": requested_url, "requested_url": requested_url, "error": "donsetch_timeout", "status": 0})
                     projected.extend(
-                        {"url": url, "error": str(RequestDeadlineExceeded()), "status": 0}
+                        {"url": url, "requested_url": url, "error": str(RequestDeadlineExceeded()), "status": 0}
                         for url in requested_urls[index + 1:]
                     )
                     # A late MCP reply can no longer be paired safely. Exit the
