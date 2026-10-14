@@ -57,6 +57,15 @@ codes, not file paths or upstream error text.
 formal-dispatch, source-envelope, keyless, and missing-key checks over every
 built-in and discovered spec without making network requests.
 
+A provider with its own transport (not `wsp_core.http_client`) calls
+`dispatch_timeout(seconds)` right before each request: it returns the socket
+timeout reduced to the engine's per-attempt cap and the time left until the
+request deadline, and raises `RequestDeadlineExceeded` (a timeout-class
+`ProviderRequestError`) once that deadline has passed. A provider that makes
+several requests per call checks `deadline_passed()` before each one and
+reports the skipped items instead of starting them. `remaining_seconds()`
+returns the time left, or `None` without a deadline.
+
 The committed `providers.d/example_fixture.py` is a no-network, non-production
 proof of the extension path. It is listed by status/doctor/bench and accepted
 for explicit dispatch only when its keyless public access is enabled; it is

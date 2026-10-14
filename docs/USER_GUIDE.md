@@ -246,6 +246,8 @@ Budget preflight is opt-in. Before a native v3 request starts any provider attem
 
 Set a limit to `null` to leave that dimension unbounded. With `on_exceed: "degrade"`, WSP deterministically applies the smallest compatible cap; with `"abort"`, it returns a typed budget failure before a provider call. Daily usage is checked and recorded in the existing local v3 `budget_ledger`; an unavailable ledger fails closed when a daily quota is enabled. The receipt endpoint includes the typed checks and any reduction or abort reason. Set `WSP_BUDGET_PREFLIGHT_OFF=1` for an emergency process-level override; `0`, `false`, `no`, and `off` leave configured preflight enabled.
 
+One unit of the request and daily budgets is one provider try that the attempt engine admits; a retry is a second unit. Most tries are one HTTP request. A batch extraction try (Firecrawl, Linkup, Serper, Keenable, DonSeTch) fetches each URL of the batch with its own request but counts as one unit. No provider request starts after the request deadline: a batch keeps the pages it already fetched and marks the rest `not tried: request ran out of time`.
+
 ### GroktoCrawl / local Firecrawl-compatible backends
 
 Firecrawl search and extraction use configurable endpoint URLs. If you run a local Firecrawl-v2-compatible service such as [GroktoCrawl](https://github.com/groktopus/groktocrawl), point the existing `firecrawl` provider at that service instead of adding a new provider name:

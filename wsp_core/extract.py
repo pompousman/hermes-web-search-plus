@@ -1167,8 +1167,13 @@ def extract_plus(
     spans_query: Optional[str] = None,
     config: Optional[Dict[str, Any]] = None,
     max_wall_time_ms: Optional[int] = None,
+    request_id: Optional[str] = None,
 ) -> dict:
-    """Legacy extract projection over the sole native v3 execution path."""
+    """Legacy extract projection over the sole native v3 execution path.
+
+    ``request_id`` names the request budget scope; a caller such as Research
+    passes it to file the extraction under its own request.
+    """
     selected = provider or "auto"
     if not urls:
         return {"provider": selected, "results": [], "error": "No URLs provided", "requested_provider": selected}
@@ -1186,6 +1191,7 @@ def extract_plus(
             "spans_query": spans_query,
             "max_wall_time_ms": max_wall_time_ms,
         },
+        request_id=request_id,
     )
     execution = execute_v3_request(
         request,
