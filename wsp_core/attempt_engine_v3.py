@@ -29,6 +29,10 @@ from .state_store_v3 import CircuitKey, SQLiteStateStore
 
 
 _MIN_RETRY_WINDOW_SECONDS = 1.0
+_HEALTH_ERROR_CLASSES = frozenset({
+    ErrorClass.AUTH, ErrorClass.QUOTA, ErrorClass.RATE_LIMIT,
+    ErrorClass.TRANSIENT, ErrorClass.TIMEOUT,
+})
 
 
 @dataclass(frozen=True)
@@ -473,7 +477,7 @@ class AttemptEngine:
                 with request_deadline_scope(context.deadline_monotonic):
                     payload = operation()
             except BaseException as exc:
-                if isinstance(exc, RequestDeadlineExceeded):
+                if isinstance(exc, RequestDeadlineExceeded) and not is_secret_scope_error(exc):
                     # No dispatch on this try: return both reservations, but
                     # keep any earlier paid failure in the attempt receipt.
                     self.store.release_budget(
@@ -508,13 +512,14 @@ class AttemptEngine:
                     )
                     if not reconciled_daily:
                         budget_decision = "store_unavailable"
-                if is_secret_scope_error(exc):
-                    # The host refused the credential read (e.g. Hermes
-                    # multiplexing without a profile scope): a configuration
-                    # error for the caller, not a provider failure to fall
-                    # back from.
+                if not isinstance(exc, Exception) or is_secret_scope_error(exc):
+                    # Control-flow and host-scope errors must reach the caller,
+                    # without retaining a probe that produced no health verdict.
+                    self._release_lease(context, decision, int(now()))
                     raise
                 classified = classify_provider_error(exc, provider=context.provider)
+                if classified.error_class not in _HEALTH_ERROR_CLASSES:
+                    self._release_lease(context, decision, int(now()))
                 last_error = classified
                 encountered.add(classified.error_class)
                 tries.append(
@@ -539,7 +544,11 @@ class AttemptEngine:
                     else None
                 )
                 if retry_wait is not None:
-                    self.sleep(retry_wait)
+                    try:
+                        self.sleep(retry_wait)
+                    except BaseException:
+                        self._release_lease(context, decision, int(now()))
+                        raise
                     continue
                 return self._failed(
                     context,
