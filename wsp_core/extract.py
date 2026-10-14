@@ -45,7 +45,7 @@ from .provider_registry import (
     EXTRACT_PROVIDER_IDS,
     PROVIDER_SPECS,
 )
-from .compat_v3 import legacy_request_to_v3, v3_response_to_legacy_extract
+from .compat_v3 import legacy_request_to_v3, normalize_provider_id, v3_response_to_legacy_extract
 from .contract_v3 import Capability, RequestV3, ResponseV3, SkipReason
 from .orchestrator_v3 import (
     CapabilityAdapter,
@@ -1169,15 +1169,23 @@ def extract_plus(
     max_wall_time_ms: Optional[int] = None,
 ) -> dict:
     """Legacy extract projection over the sole native v3 execution path."""
-    selected = provider or "auto"
+    selected = normalize_provider_id(provider)
     if not urls:
         return {"provider": selected, "results": [], "error": "No URLs provided", "requested_provider": selected}
+    if selected != "auto" and selected not in EXTRACT_PROVIDER_IDS:
+        valid = ", ".join(["auto", *EXTRACT_PROVIDER_IDS])
+        return {
+            "provider": selected,
+            "results": [],
+            "error": f"unknown extraction provider {provider!r}. Valid providers: {valid}",
+            "requested_provider": selected,
+        }
     runtime_config = config or load_config()
     request = legacy_request_to_v3(
         Capability.EXTRACT,
         {
             "urls": urls,
-            "provider": provider,
+            "provider": selected,
             "output_format": output_format,
             "include_images": include_images,
             "include_raw_html": include_raw_html,
