@@ -303,11 +303,11 @@ def test_native_backend_reports_a_refused_read(monkeypatch, hermes):
     """The opt-in native wsp backend passes the scope error on instead of a generic failure."""
     web_provider = types.ModuleType("agent.web_search_provider")
     web_provider.WebSearchProvider = object
-    web_tools = types.ModuleType("tools.web_tools")
-    web_tools._load_web_config = lambda: {"backend": "wsp"}
+    web_tools = types.ModuleType("hermes_cli.config")
+    web_tools.load_config = lambda: {"web": {"backend": "wsp"}}
     monkeypatch.setitem(sys.modules, "agent.web_search_provider", web_provider)
     monkeypatch.setitem(sys.modules, "tools", types.ModuleType("tools"))
-    monkeypatch.setitem(sys.modules, "tools.web_tools", web_tools)
+    monkeypatch.setitem(sys.modules, "hermes_cli.config", web_tools)
     import importlib
 
     # register() in an earlier test may have imported the backend against a real

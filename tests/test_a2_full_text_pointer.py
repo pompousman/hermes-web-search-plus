@@ -212,10 +212,10 @@ def test_native_backend_marks_budget_truncation_and_never_claims_full(tmp_path, 
 
     abc = ModuleType("agent.web_search_provider")
     abc.WebSearchProvider = object
-    web = ModuleType("tools.web_tools")
-    web._load_web_config = lambda: {"backend": "wsp"}
+    web = ModuleType("hermes_cli.config")
+    web.load_config = lambda: {"web": {"backend": "wsp"}}
     monkeypatch.setitem(sys.modules, "agent.web_search_provider", abc)
-    monkeypatch.setitem(sys.modules, "tools.web_tools", web)
+    monkeypatch.setitem(sys.modules, "hermes_cli.config", web)
     spec = importlib.util.spec_from_file_location(
         "_wsp_native_a2", Path(__file__).resolve().parents[1] / "native_backend.py"
     )

@@ -12,11 +12,11 @@ import pytest
 def backend(monkeypatch):
     abc = ModuleType("agent.web_search_provider")
     abc.WebSearchProvider = object
-    web = ModuleType("tools.web_tools")
+    web = ModuleType("hermes_cli.config")
     config = {"backend": "wsp"}
-    web._load_web_config = lambda: config
+    web.load_config = lambda: {"web": config}
     monkeypatch.setitem(sys.modules, "agent.web_search_provider", abc)
-    monkeypatch.setitem(sys.modules, "tools.web_tools", web)
+    monkeypatch.setitem(sys.modules, "hermes_cli.config", web)
     spec = importlib.util.spec_from_file_location(
         "_wsp_native_unit", Path(__file__).resolve().parents[1] / "native_backend.py"
     )
@@ -37,6 +37,16 @@ def backend(monkeypatch):
     )
     return SimpleNamespace(module=module, value=module.WSPNativeBackend(plugin),
                            plugin=plugin, config=config, engine=engine)
+
+
+@pytest.mark.parametrize("web", [{"extract_backend": "wsp"}, None, [], "wsp"])
+def test_web_config_uses_public_loader_and_always_returns_dict(backend, monkeypatch, web):
+    config = ModuleType("hermes_cli.config")
+    config.load_config = lambda: {"web": web}
+    monkeypatch.setitem(sys.modules, "hermes_cli.config", config)
+    assert backend.module._load_web_config() == (web if isinstance(web, dict) else {})
+    config.load_config = Mock(side_effect=RuntimeError("unavailable"))
+    assert backend.module._load_web_config() == {}
 
 
 def test_no_implicit_selection(backend):
@@ -223,10 +233,10 @@ def test_real_engine_private_url_returns_policy_marker(monkeypatch):
     plugin = load_plugin("wsp_plugin_native_rescue_under_test")
     abc = ModuleType("agent.web_search_provider")
     abc.WebSearchProvider = object
-    web = ModuleType("tools.web_tools")
-    web._load_web_config = lambda: {"backend": "wsp"}
+    web = ModuleType("hermes_cli.config")
+    web.load_config = lambda: {"web": {"backend": "wsp"}}
     monkeypatch.setitem(sys.modules, "agent.web_search_provider", abc)
-    monkeypatch.setitem(sys.modules, "tools.web_tools", web)
+    monkeypatch.setitem(sys.modules, "hermes_cli.config", web)
     spec = importlib.util.spec_from_file_location(
         "_wsp_native_real", Path(__file__).resolve().parents[1] / "native_backend.py"
     )

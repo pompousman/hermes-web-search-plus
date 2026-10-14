@@ -18,7 +18,6 @@ from typing import Any, Dict, List, Optional
 from urllib.parse import urlsplit
 
 from agent.web_search_provider import WebSearchProvider
-from tools.web_tools import _load_web_config
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +25,17 @@ try:  # package import (Hermes); the standalone unit-test load has no parent
     from .wsp_core.extract_match import match_extract_items as _match_extract_items
 except ImportError:  # pragma: no cover - exercised only outside the package
     _match_extract_items = None
+
+
+def _load_web_config() -> Dict[str, Any]:
+    """Read optional web settings through Hermes' public config API."""
+    try:
+        from hermes_cli.config import load_config
+
+        web = load_config().get("web") or {}
+        return web if isinstance(web, dict) else {}
+    except Exception:  # noqa: BLE001 — unavailable/malformed config is optional
+        return {}
 
 
 def _match_rows(urls: List[str], rows: List[Dict[str, Any]]) -> List[Optional[Dict[str, Any]]]:

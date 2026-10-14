@@ -158,13 +158,13 @@ def native_module(monkeypatch):
     provider_module.WebSearchProvider = object
     tools = ModuleType("tools")
     tools.__path__ = []
-    web = ModuleType("tools.web_tools")
-    web._load_web_config = lambda: {"backend": "wsp"}
+    web = ModuleType("hermes_cli.config")
+    web.load_config = lambda: {"web": {"backend": "wsp"}}
     for name, module in (
         ("agent", agent),
         ("agent.web_search_provider", provider_module),
         ("tools", tools),
-        ("tools.web_tools", web),
+        ("hermes_cli.config", web),
     ):
         monkeypatch.setitem(sys.modules, name, module)
     package = load_plugin("hermes_plugins.web_search_plus")
