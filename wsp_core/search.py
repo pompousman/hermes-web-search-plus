@@ -2000,7 +2000,9 @@ def _last_resort_probe(engine, store, provider, contexts, operation_for, race):
     context = contexts[provider]
     now = int(time.time())
     for error_class in (ErrorClass.TRANSIENT, ErrorClass.TIMEOUT):
-        store.record_success(context.circuit_key, error_class, now=now)
+        # Only end the open window; the failure counts stay until the probe
+        # actually succeeds (a budget-blocked or failed probe must not erase them).
+        store.expire_circuit(context.circuit_key, error_class, now=now)
     execution = engine.execute(context, operation_for(provider))
     receipts = [execution.receipt if r.provider == provider else r for r in race.receipts]
     payload = execution.payload

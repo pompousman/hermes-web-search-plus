@@ -511,6 +511,42 @@ class SQLiteStateStore:
             self._available = False
             return False
 
+    def expire_circuit(
+        self, key: CircuitKey, error_class: ErrorClass, *, now: int
+    ) -> bool:
+        """End an open window early so the next admission may probe.
+
+        The failure count is kept: a probe that fails again re-opens the
+        circuit at once, and only a successful probe clears it.
+        """
+        if not self._available:
+            return False
+        try:
+            connection = self._connect()
+            try:
+                cursor = connection.execute(
+                    """
+                    UPDATE circuit_state SET open_until=?, updated_at=?
+                    WHERE provider=? AND capability=? AND endpoint=?
+                      AND credential_fingerprint=? AND error_class=?
+                      AND state=? AND open_until > ?
+                    """,
+                    (
+                        now,
+                        now,
+                        *key.values(),
+                        error_class.value,
+                        CircuitState.OPEN.value,
+                        now,
+                    ),
+                )
+                return cursor.rowcount == 1
+            finally:
+                connection.close()
+        except sqlite3.Error:
+            self._available = False
+            return False
+
     def release_half_open(
         self, key: CircuitKey, error_class: ErrorClass, *, now: int
     ) -> bool:
