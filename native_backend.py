@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import logging
 from typing import Any, Dict, List, Optional
+from urllib.parse import urlsplit
 
 from agent.web_search_provider import WebSearchProvider
 from tools.web_tools import _load_web_config
@@ -26,6 +27,33 @@ _WSP_MAX_RESULTS = 20
 
 _NATIVE_BACKEND_NAME = "wsp"
 _NATIVE_DISPLAY_NAME = "Web Search Plus (native)"
+
+# Prefix of every error the engine's URL guard raises for a target it refused on
+# purpose (private/internal address, blocked name, unresolvable host).
+_URL_REFUSED_PREFIX = "Extraction URL blocked"
+_URL_REFUSED_MESSAGE = (
+    "Blocked by Web Search Plus URL policy: private/internal or unresolvable address"
+)
+
+
+def _refused_entry(url: str) -> Dict[str, Any]:
+    """Error entry carrying Hermes' ``blocked_by_policy`` marker.
+
+    Hermes' one-shot keyless rescue (``web.keyless_rescue``) re-sends failed
+    extract items to anonymous third-party backends, except entries with a
+    truthy ``blocked_by_policy`` (tools/web_tools_rescue.py). A URL WSP refused
+    on purpose must not be forwarded there. Only the requested host is named,
+    never a resolved address.
+    """
+    try:
+        host = urlsplit(url).hostname or ""
+    except ValueError:
+        host = ""
+    return {
+        "url": url,
+        "error": _URL_REFUSED_MESSAGE,
+        "blocked_by_policy": {"host": host, "rule": "wsp-url-guard", "source": "web-search-plus"},
+    }
 
 
 class WSPNativeBackend(WebSearchProvider):
@@ -255,6 +283,10 @@ class WSPNativeBackend(WebSearchProvider):
             ]
 
         if data.get("error") and not data.get("results"):
+            if _URL_REFUSED_PREFIX in str(data["error"]):
+                # Every URL failed the engine's pre-flight check; the joined error
+                # cannot be mapped back to single URLs, so none may be rescued.
+                return [_refused_entry(url) for url in url_list]
             message = self._failure_message(data, "WSP native extraction failed; check provider readiness and configuration")
             return [{"url": url, "error": message} for url in url_list]
 
@@ -280,6 +312,9 @@ class WSPNativeBackend(WebSearchProvider):
                 if isinstance(row.get(key), str):
                     normalized[key] = row[key]
             if row.get("error"):
+                if str(row["error"]).startswith(_URL_REFUSED_PREFIX):
+                    by_url[url] = _refused_entry(url)
+                    continue
                 normalized["error"] = "WSP extraction failed for this URL"
             metadata = {key: row[key] for key in (
                 "fetcher", "status", "quality", "lang", "source_type", "page_type",

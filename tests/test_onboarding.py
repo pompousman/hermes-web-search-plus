@@ -1363,3 +1363,67 @@ def test_session_hint_names_the_hermes_command(tmp_path):
 
     assert "hermes web-search-plus setup" in hint["message"]
     assert "setup.py" not in hint["message"]
+
+
+def _rescue_state(tmp_path, body):
+    path = tmp_path / "config.yaml"
+    path.write_text(body)
+    before = path.read_bytes()
+    state = wsp._build_fastpath_report(path)["keyless_rescue"]
+    assert path.read_bytes() == before  # read-only
+    return state
+
+
+def test_fastpath_reports_keyless_rescue_on_by_default_when_native_selected(tmp_path):
+    state = _rescue_state(tmp_path, "web:\n  search_backend: wsp\n")
+    assert state["native_selected"] is True and state["native_capabilities"] == ["search"]
+    assert state["keyless_rescue"] is True
+    assert state["how_to_disable"] == "hermes config set web.keyless_rescue false"
+    report = wsp._build_fastpath_report(tmp_path / "config.yaml")
+    text = wsp._render_fastpath_report(report)
+    assert "Hermes keyless rescue: ON" in text and "hermes config set web.keyless_rescue false" in text
+
+
+@pytest.mark.parametrize("body", [
+    "web:\n  backend: wsp\n  keyless_rescue: false\n",
+    "web:\n  backend: wsp\n  keyless_fallback: false\n",
+])
+def test_fastpath_reports_keyless_rescue_off(tmp_path, body):
+    state = _rescue_state(tmp_path, body)
+    assert state["native_selected"] is True and state["keyless_rescue"] is False
+    assert "Hermes keyless rescue: off" in wsp._render_fastpath_report(wsp._build_fastpath_report(tmp_path / "config.yaml"))
+
+
+def test_keyless_rescue_fallback_parser_without_pyyaml(tmp_path, monkeypatch):
+    monkeypatch.setitem(sys.modules, "yaml", None)  # import yaml -> ImportError
+    state = _rescue_state(tmp_path, "web:\n  backend: wsp\n  keyless_rescue: false  # privacy\n")
+    assert state["native_selected"] and state["keyless_rescue"] is False
+    assert _rescue_state(tmp_path, "web:\n  backend: wsp\n")["keyless_rescue"] is True
+
+
+def test_native_not_selected_reports_rescue_not_applicable(tmp_path):
+    state = _rescue_state(tmp_path, "web:\n  backend: firecrawl\n")
+    assert state["native_selected"] is False
+    text = wsp._render_keyless_rescue(state)
+    assert "not selected" in text[0]
+
+
+def test_status_command_shows_rescue_state_from_fake_config(tmp_path, monkeypatch, capsys):
+    hermes = tmp_path / "hermes.yaml"
+    hermes.write_text("web:\n  extract_backend: wsp\n")
+    before = hermes.read_bytes()
+    monkeypatch.setenv("HERMES_CONFIG", str(hermes))
+    parser = wsp.argparse.ArgumentParser()
+    wsp._web_search_plus_cli_setup(parser)
+    cfg = tmp_path / "config.json"
+    cfg.write_text('{"version": 1}\n')
+    args = parser.parse_args(["status", "--json", "--config-path", str(cfg)])
+    args.func(args)
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["hermes_native"]["native_capabilities"] == ["extract"]
+    assert payload["hermes_native"]["keyless_rescue"] is True
+    args = parser.parse_args(["status", "--plain", "--config-path", str(cfg)])
+    args.func(args)
+    assert "Hermes keyless rescue: ON" in capsys.readouterr().out
+    assert hermes.read_bytes() == before
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["config.json", "hermes.yaml"]

@@ -264,8 +264,8 @@ def _yamlish_nested_list_item(text: str, parent: str, key: str, item: str) -> bo
     return False
 
 
-def _native_backend_hints(text: str) -> List[str]:
-    """Inspect native backend pins; stdlib setup supports simple block YAML.
+def _hermes_web_settings(text: str) -> Dict[str, Any]:
+    """Read the ``web:`` block of Hermes config text; advisory and read-only.
 
     Use the real YAML parser when installed (as it is in Hermes), retaining a
     conservative block-scalar fallback for standalone, dependency-free setup.
@@ -288,16 +288,62 @@ def _native_backend_hints(text: str) -> List[str]:
                 )
                 if match:
                     web[match[1]] = match[2]
-    else:
-        try:
-            data = yaml.safe_load(text)
-            web = data.get("web", {}) if isinstance(data, dict) else {}
-            if not isinstance(web, dict):
-                web = {}
-        except yaml.YAMLError:
-            web = {}
+                match = re.fullmatch(
+                    r"\s+(keyless_rescue|keyless_fallback):\s*['\"]?(true|false|yes|no|on|off)['\"]?\s*(?:#.*)?",
+                    line, re.IGNORECASE,
+                )
+                if match:
+                    web[match[1]] = match[2].lower() in {"true", "yes", "on"}
+        return web
+    try:
+        data = yaml.safe_load(text)
+        web = data.get("web", {}) if isinstance(data, dict) else {}
+        return web if isinstance(web, dict) else {}
+    except yaml.YAMLError:
+        return {}
+
+
+def _native_backend_hints(text: str) -> List[str]:
+    """Capabilities (``search``/``extract``) that Hermes config pins to ``wsp``."""
+    web = _hermes_web_settings(text)
     return [kind for kind in ("search", "extract")
             if (web.get(kind + "_backend") or web.get("backend")) == "wsp"]
+
+
+_KEYLESS_RESCUE_OFF_COMMAND = "hermes config set web.keyless_rescue false"
+
+
+def _keyless_rescue_state(text: str) -> Dict[str, Any]:
+    """Whether Hermes may re-send a failed native ``wsp`` call to its keyless ring.
+
+    Mirrors Hermes' gate: ``web.keyless_rescue`` (default on) and
+    ``web.keyless_fallback`` (default on) must both be on. Read-only; a missing
+    or unreadable config means the Hermes defaults, i.e. on.
+    """
+    web = _hermes_web_settings(text)
+    capabilities = _native_backend_hints(text)
+    rescue = bool(web.get("keyless_rescue", True)) and bool(web.get("keyless_fallback", True))
+    return {
+        "native_selected": bool(capabilities),
+        "native_capabilities": capabilities,
+        "keyless_rescue": rescue,
+        "how_to_disable": _KEYLESS_RESCUE_OFF_COMMAND,
+        "explanation": (
+            "Hermes re-sends a failed native `wsp` web_search/web_extract call, with its query or URL, to "
+            "anonymous keyless backends (Exa, Parallel, Firecrawl, Keenable). "
+            + ("Turn it off: " + _KEYLESS_RESCUE_OFF_COMMAND
+               if rescue else "Disabled (web.keyless_rescue or web.keyless_fallback is false).")
+        ),
+    }
+
+
+def _hermes_keyless_rescue_state(config_path: Optional[Path] = None) -> Dict[str, Any]:
+    """:func:`_keyless_rescue_state` for the Hermes config.yaml on disk; never writes it."""
+    try:
+        text = (config_path or _get_hermes_config_path()).read_text()
+    except OSError:
+        text = ""
+    return _keyless_rescue_state(text)
 
 
 def _build_fastpath_report(config_path: Optional[Path] = None) -> Dict[str, Any]:
@@ -363,6 +409,7 @@ def _build_fastpath_report(config_path: Optional[Path] = None) -> Dict[str, Any]
         "native_capabilities": native_capabilities,
         "preferred_web_path_configured": preferred,
         "hermes_config": str(config_path),
+        "keyless_rescue": _keyless_rescue_state(config_text),
         "checks": checks,
         "recommended_hermes_config": {} if native_capabilities else {
             "agent.disabled_toolsets": ["web"],
@@ -373,6 +420,17 @@ def _build_fastpath_report(config_path: Optional[Path] = None) -> Dict[str, Any]
             "No local Hermes core patches are required; this doctor only recommends config that exists in current Hermes.",
         ],
     }
+
+
+def _render_keyless_rescue(state: Mapping[str, Any]) -> List[str]:
+    """Human lines for the native-backend / Hermes keyless-rescue state."""
+    if not state.get("native_selected"):
+        return ["Native wsp backend: not selected (Hermes keyless rescue does not apply to WSP)."]
+    caps = ", ".join(state.get("native_capabilities") or [])
+    return [
+        f"Native wsp backend: selected for {caps}. Hermes keyless rescue: {'ON' if state.get('keyless_rescue') else 'off'}.",
+        f"  {state.get('explanation')}",
+    ]
 
 
 def _render_fastpath_report(report: Mapping[str, Any]) -> str:
@@ -394,6 +452,8 @@ def _render_fastpath_report(report: Mapping[str, Any]) -> str:
             "Native WSP selected for: " + ", ".join(report.get("native_capabilities", [])),
             "Keep the Hermes web toolset enabled. This check inspects config only;",
             "plugin registration and provider readiness require a runtime smoke.",
+            "",
+            *_render_keyless_rescue(report.get("keyless_rescue") or {}),
         ])
         return "\n".join(lines)
     lines.extend([
@@ -840,7 +900,11 @@ def _donsetch_status(env: Mapping[str, str], config: Mapping[str, Any]) -> Dict[
     return inspect(key=_clean_env_value(env.get("DONSETCH_BIN") or ""), config=dict(config))
 
 
-def _status_payload(env: Optional[Mapping[str, str]] = None, config: Optional[Mapping[str, Any]] = None) -> Dict[str, Any]:
+def _status_payload(
+    env: Optional[Mapping[str, str]] = None,
+    config: Optional[Mapping[str, Any]] = None,
+    hermes_config_path: Optional[Path] = None,
+) -> Dict[str, Any]:
     active_env = env if env is not None else _credential_env()
     active_config = dict(config or _default_behavior_config())
     return {
@@ -849,6 +913,7 @@ def _status_payload(env: Optional[Mapping[str, str]] = None, config: Optional[Ma
         "routing": active_config,
         "donsetch": _donsetch_status(active_env, active_config),
         "jev": jev_setup.status_payload(active_env, active_config),
+        "hermes_native": _hermes_keyless_rescue_state(hermes_config_path),
     }
 
 
@@ -1361,6 +1426,7 @@ def _web_search_plus_cli_command(args: Any) -> None:
         else:
             print(_render_setup_guidance(env=env, fancy=not getattr(args, "plain", False), config=config))
             print("\n" + _routing_summary(config))
+            print("\n" + "\n".join(_render_keyless_rescue(payload["hermes_native"])))
             if desktop:
                 print("  from Hermes Desktop settings: " + ", ".join(sorted(desktop)))
             donsetch = payload.get("donsetch") or {}

@@ -169,3 +169,68 @@ def test_registration_and_older_host(backend):
     assert backend.module.register_native_backend(object(), backend.plugin) is None
     ctx.register_web_search_provider.side_effect = RuntimeError("failure")
     assert backend.module.register_native_backend(ctx, backend.plugin) is None
+
+
+def _refused(row):
+    marker = row.get("blocked_by_policy")
+    return bool(marker) and "error" in row and not row.get("content")
+
+
+def test_extract_refused_url_carries_hermes_policy_marker_all_refused(backend):
+    # Whole-batch refusal: the engine returns a joined error and no rows.
+    backend.plugin._run_extract.return_value = {
+        "provider": "auto", "results": [],
+        "error": "Extraction URL blocked: 127.0.0.1 is private/internal",
+    }
+    urls = ["http://127.0.0.1/admin", "http://10.0.0.5/x"]
+    rows = backend.value.extract(urls)
+    assert [r["url"] for r in rows] == urls
+    assert all(_refused(r) for r in rows)
+    assert rows[0]["blocked_by_policy"]["host"] == "127.0.0.1"
+    assert "10.0.0.5" not in rows[0]["error"]
+
+
+def test_extract_refused_url_in_mixed_batch_is_marked_only_for_that_url(backend):
+    backend.plugin._run_extract.return_value = {"results": [
+        {"url": "https://example.org", "content": "ok"},
+        {"url": "http://localhost/", "title": "", "content": "",
+         "error": "Extraction URL blocked: localhost is private/internal"},
+        {"url": "https://down.invalid", "content": "", "error": "provider boom"},
+    ]}
+    rows = backend.value.extract(["https://example.org", "http://localhost/", "https://down.invalid"])
+    assert "blocked_by_policy" not in rows[0] and rows[0]["content"] == "ok"
+    assert _refused(rows[1])
+    # An ordinary provider failure must stay rescuable: no policy marker.
+    assert rows[2]["error"] and "blocked_by_policy" not in rows[2]
+
+
+def test_extract_ordinary_failures_never_get_policy_marker(backend):
+    for payload in (
+        {"results": [], "error": "All extraction providers failed"},
+        {"results": [], "error": "Invalid URL — must start with http:// or https://: ['x']"},
+        {"results": [{"url": "https://example.org", "error": "timeout"}]},
+    ):
+        backend.plugin._run_extract.return_value = payload
+        assert all("blocked_by_policy" not in r for r in backend.value.extract(["https://example.org"]))
+    backend.plugin._run_extract.side_effect = RuntimeError("boom")
+    assert all("blocked_by_policy" not in r for r in backend.value.extract(["https://example.org"]))
+
+
+def test_real_engine_private_url_returns_policy_marker(monkeypatch):
+    """End to end through the real plugin and engine: literal private IP, no network."""
+    from plugin_loader import load_plugin
+
+    plugin = load_plugin("wsp_plugin_native_rescue_under_test")
+    abc = ModuleType("agent.web_search_provider")
+    abc.WebSearchProvider = object
+    web = ModuleType("tools.web_tools")
+    web._load_web_config = lambda: {"backend": "wsp"}
+    monkeypatch.setitem(sys.modules, "agent.web_search_provider", abc)
+    monkeypatch.setitem(sys.modules, "tools.web_tools", web)
+    spec = importlib.util.spec_from_file_location(
+        "_wsp_native_real", Path(__file__).resolve().parents[1] / "native_backend.py"
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    rows = module.WSPNativeBackend(plugin).extract(["http://127.0.0.1:8080/secret", "http://192.168.1.10/"])
+    assert len(rows) == 2 and all(r.get("blocked_by_policy") for r in rows)
