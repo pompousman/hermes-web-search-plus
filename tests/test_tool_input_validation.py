@@ -1,19 +1,12 @@
 """Search tool input is cleaned before any provider is called."""
-import importlib
-import sys
-from pathlib import Path
-
 import pytest
 
-ROOT = Path(__file__).resolve().parents[1]
+from plugin_loader import load_plugin
 
 
 @pytest.fixture(scope="module")
 def plugin():
-    pkg_parent = ROOT.parent
-    if str(pkg_parent) not in sys.path:
-        sys.path.insert(0, str(pkg_parent))
-    return importlib.import_module(ROOT.name)
+    return load_plugin("wsp_plugin_test_tool_input_validation")
 
 
 @pytest.mark.parametrize("value,expected", [
