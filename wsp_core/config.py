@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import sys
@@ -10,7 +11,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from .credentials import get_secret
+from .credentials import file_credentials_allowed, get_secret
 from .env_loader import clean_env_value as _shared_clean_env_value, is_truthy
 from .errors_v3 import MissingProviderKeyError, ProviderConfigError
 from .provider_registry import (
@@ -983,10 +984,48 @@ def load_config() -> Dict[str, Any]:
     return apply_profile_effects(config)
 
 
-def get_api_key(provider: str, config: Dict[str, Any] = None) -> Optional[str]:
-    """Get API key for provider from config.json or environment.
+_logger = logging.getLogger(__name__)
+_IGNORED_FILE_KEY_WARNED: set = set()
 
-    Priority: config.json > .env > environment variable
+
+def file_api_key(provider: str, config: Optional[Dict[str, Any]]) -> Optional[str]:
+    """The ``api_key``/``apiKey`` stored for ``provider`` in config.json, whether or not it may be used."""
+    provider_config = (config or {}).get(provider, {})
+    if not isinstance(provider_config, dict):
+        return None
+    key = provider_config.get("api_key") or provider_config.get("apiKey")
+    return (_clean_env_value(str(key)) if key is not None else None) or None
+
+
+def ignored_file_credentials(config: Optional[Dict[str, Any]]) -> List[str]:
+    """Providers whose config.json key is present but ignored because a host resolver is installed."""
+    if file_credentials_allowed():
+        return []
+    return [p for p in PROVIDER_SPECS if p != "searxng" and file_api_key(p, config)]
+
+
+def ignored_file_credential_notice(provider: str) -> str:
+    spec = PROVIDER_SPECS.get(provider)
+    env_var = spec.env_var if spec else f"{provider.upper()}_API_KEY"
+    return (
+        f"config.json contains an API key for {provider}; it is ignored — "
+        f"store it with `hermes config set {env_var} …`"
+    )
+
+
+def _warn_ignored_file_key(provider: str) -> None:
+    if provider in _IGNORED_FILE_KEY_WARNED:
+        return
+    _IGNORED_FILE_KEY_WARNED.add(provider)
+    _logger.warning("web-search-plus: %s", ignored_file_credential_notice(provider))
+
+
+def get_api_key(provider: str, config: Dict[str, Any] = None) -> Optional[str]:
+    """Get API key for provider from the host's credential store or config.json.
+
+    With a host secret resolver installed (Hermes) only the resolver is used and a
+    key stored in config.json is ignored (warned once). Without one (MCP server,
+    OpenClaw skill, standalone CLI) the priority is config.json > environment.
 
     Note: SearXNG doesn't require an API key, but returns instance_url if configured.
     """
@@ -994,14 +1033,13 @@ def get_api_key(provider: str, config: Dict[str, Any] = None) -> Optional[str]:
     if provider == "searxng":
         return get_searxng_instance_url(config)
 
-    # Check config.json first
+    # Check config.json first, unless a host resolver owns the credentials
     if config:
-        provider_config = config.get(provider, {})
-        if isinstance(provider_config, dict):
-            key = provider_config.get("api_key") or provider_config.get("apiKey")
-            key = _clean_env_value(str(key)) if key is not None else None
-            if key:
+        key = file_api_key(provider, config)
+        if key:
+            if file_credentials_allowed():
                 return key
+            _warn_ignored_file_key(provider)
 
     # Then check environment
     spec = PROVIDER_SPECS.get(provider)

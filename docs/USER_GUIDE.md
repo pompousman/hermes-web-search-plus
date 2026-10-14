@@ -181,6 +181,7 @@ Secrets and behavior are intentionally separate:
 
 - Provider keys live in the Hermes profile (`hermes config set`, Hermes Desktop).
 - Routing behavior lives in `config.json`.
+- API keys do not belong in `config.json` under Hermes: store them with `hermes config set <PROVIDER>_API_KEY <key>`. Under Hermes a `api_key`/`apiKey` found in `config.json` is ignored (`hermes web-search-plus status` says so, without printing the value); the MCP server, OpenClaw skill and standalone CLI still read it. Status, `config show --json` and dry-run output never print key values.
 - `WEB_SEARCH_PLUS_CONFIG=/path/to/config.json` can point runtime search at a custom config.
 - `setup.py --config-path /path/to/config.json` points the setup helper at a custom config.
 

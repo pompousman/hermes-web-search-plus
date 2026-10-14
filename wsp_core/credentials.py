@@ -14,7 +14,8 @@ read ``.env`` files itself.
 from __future__ import annotations
 
 import os
-from typing import Callable, Optional
+import re
+from typing import Any, Callable, Mapping, Optional
 
 SecretResolver = Callable[[str, Optional[str]], Optional[str]]
 
@@ -29,6 +30,17 @@ def set_secret_resolver(resolver: Optional[SecretResolver]) -> None:
 
 def get_secret_resolver() -> Optional[SecretResolver]:
     return _resolver
+
+
+def file_credentials_allowed() -> bool:
+    """Whether API keys written into ``config.json`` may be used.
+
+    Under a host resolver (Hermes) every credential comes from the active
+    profile through that resolver; a key in the shared ``config.json`` would be
+    used by every profile, so it is ignored. Hosts without a resolver (MCP
+    server, OpenClaw skill, standalone CLI) keep reading ``config.json``.
+    """
+    return _resolver is None
 
 
 def get_secret(name: str, default: Optional[str] = None) -> Optional[str]:
@@ -66,3 +78,32 @@ def is_secret_scope_error(exc: BaseException) -> bool:
     "no keys configured".
     """
     return bool(getattr(exc, _SCOPE_ERROR_MARK, False))
+
+
+_SECRET_KEY_RE = re.compile(r"(^|_)(api_?key|token|secret|password|passwd|authorization|credentials?)$|_api_key$", re.I)
+_SECRET_KEY_CAMEL_RE = re.compile(r"(apikey|accesstoken|authtoken|clientsecret|secretkey|bearer)$", re.I)
+
+
+def is_secret_field(name: Any) -> bool:
+    """Whether a config/JSON field name holds a secret (``api_key``, ``apiKey``, ``*_API_KEY``, ...)."""
+    text = str(name)
+    return bool(_SECRET_KEY_RE.search(text) or _SECRET_KEY_CAMEL_RE.search(text.replace("_", "")))
+
+
+def redact_secrets(value: Any) -> Any:
+    """Copy of ``value`` with every secret field replaced by ``"set"`` / ``"not set"``.
+
+    Use it for every status, config, dry-run or JSON output that is built from
+    config.json or the credential environment. The secret itself is never kept.
+    """
+    if isinstance(value, Mapping):
+        out = {}
+        for key, item in value.items():
+            if is_secret_field(key) and not isinstance(item, (Mapping, list, tuple)):
+                out[key] = "set" if (item not in (None, "", False)) else "not set"
+            else:
+                out[key] = redact_secrets(item)
+        return out
+    if isinstance(value, (list, tuple)):
+        return [redact_secrets(item) for item in value]
+    return value
