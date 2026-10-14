@@ -29,6 +29,7 @@ from .http_client import (
 )
 from .errors_v3 import classify_provider_error
 from .contract_v3 import ErrorClass
+from .credentials import redact_url
 from .quality import _title_from_url
 from .diversity_v3 import MULTI_LABEL_SUFFIXES
 from .urls import (
@@ -1774,7 +1775,7 @@ def search_searxng(
     except URLError as e:
         reason = str(getattr(e, "reason", e))
         is_timeout = isinstance(getattr(e, "reason", None), socket.timeout) or "timed out" in reason.lower()
-        raise ProviderRequestError(f"Cannot reach SearXNG instance at {instance_url}. Error: {reason}", transient=is_timeout)
+        raise ProviderRequestError(f"Cannot reach SearXNG instance at {redact_url(instance_url, origin_only=True)}. Connection failed.", transient=is_timeout)
     except RequestDeadlineExceeded:
         raise
     except (TimeoutError, socket.timeout):
@@ -1810,7 +1811,7 @@ def search_searxng(
         "metadata": {
             "number_of_results": data.get("number_of_results"),
             "engines_used": list(engines_used),
-            "instance_url": instance_url,
+            "instance_url": redact_url(instance_url, origin_only=True),
         }
     }
 

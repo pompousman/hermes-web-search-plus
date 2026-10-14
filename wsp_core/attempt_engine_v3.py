@@ -642,12 +642,14 @@ def provider_attempt_context(
     **budget: Any,
 ) -> AttemptContext:
     """Attempt context for one provider: endpoint, credential fingerprint, budget."""
-    endpoint = str(
+    from .credentials import redact_url
+
+    endpoint = (
         provider_config.get("endpoint")
         or provider_config.get("base_url")
         or provider_config.get("url")
-        or f"provider://{provider}/{capability.value}"
     )
+    endpoint = redact_url(str(endpoint), origin_only=True) if endpoint else f"provider://{provider}/{capability.value}"
     return AttemptContext(
         provider=provider,
         capability=capability,
