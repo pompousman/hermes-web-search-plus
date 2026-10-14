@@ -451,6 +451,26 @@ class RequestDeadlineExceeded(ProviderRequestError, TimeoutError):
         super().__init__(message, transient=False)
 
 
+def is_request_deadline_abort(
+    error: BaseException, *, deadline_monotonic: float | None = None
+) -> bool:
+    """Caller exhaustion is not evidence that the provider is unhealthy."""
+    if isinstance(error, RequestDeadlineExceeded):
+        return True
+    remaining = (
+        remaining_seconds() if deadline_monotonic is None
+        else deadline_monotonic - time.monotonic()
+    )
+    return remaining is not None and remaining <= 0 and (
+        isinstance(error, TimeoutError)
+        or (
+            isinstance(error, ProviderRequestError)
+            and error.transient
+            and error.status_code is None
+        )
+    )
+
+
 def _response_header(response, name: str) -> str:
     """Return an HTTP response header from urllib response/error objects."""
     if hasattr(response, "getheader"):

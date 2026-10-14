@@ -35,6 +35,7 @@ from .bounded_context_v3 import (
 )
 from .attempt_engine_v3 import AttemptEngine, provider_attempt_context, request_deadline
 from .errors_v3 import ProviderContractFailure
+from .http_client import NOT_TRIED_DEADLINE_ERROR, RequestDeadlineExceeded
 from .http_client import ProviderRequestError
 # Provider dispatch resolves implementations late through this module.
 from . import providers as _providers
@@ -454,6 +455,8 @@ def _extract_plus_core(
         if not res_list:
             raise ProviderContractFailure("jev_extract_quality_rejected")
     if not any(_extract_item_usable(r) for r in res_list):
+        if res_list and all(r.get("error") == NOT_TRIED_DEADLINE_ERROR for r in res_list):
+            raise RequestDeadlineExceeded()
         # Empty lists and blank pages are failures too, so they fall back
         # and are never cached as a success.
         raise ProviderContractFailure("all_urls_failed")

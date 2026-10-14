@@ -19,9 +19,16 @@ from .contract_v3 import (
 )
 from .credentials import is_secret_scope_error
 from .errors_v3 import classify_provider_error
-from .http_client import request_deadline_scope
+from .http_client import (
+    RequestDeadlineExceeded,
+    is_request_deadline_abort,
+    request_deadline_scope,
+)
 from .provider_health import MAX_RETRY_AFTER_WAIT_SECONDS, _retry_delay
 from .state_store_v3 import CircuitKey, SQLiteStateStore
+
+
+_MIN_RETRY_WINDOW_SECONDS = 1.0
 
 
 @dataclass(frozen=True)
@@ -131,7 +138,7 @@ class AttemptEngine:
             wait = _retry_delay(attempt_index)
         if (
             context.deadline_monotonic is not None
-            and time.monotonic() + wait >= context.deadline_monotonic
+            and time.monotonic() + wait + _MIN_RETRY_WINDOW_SECONDS > context.deadline_monotonic
         ):
             return None
         return wait
@@ -186,21 +193,24 @@ class AttemptEngine:
         budget_decision: str,
         before: CircuitState,
         now: Callable[[], int],
+        deadline_aborted: bool = False,
     ) -> AttemptExecution:
-        """Record the failure of a provider call that really ran and report it."""
-        after_record = self.store.record_failure(
-            context.circuit_key,
-            error.error_class,
-            now=int(now()),
-            retry_after_seconds=error.retry_after_seconds,
-        )
+        """Report a real try, recording only provider-owned failures as health."""
+        after = before
+        if not deadline_aborted:
+            after = self.store.record_failure(
+                context.circuit_key,
+                error.error_class,
+                now=int(now()),
+                retry_after_seconds=error.retry_after_seconds,
+            ).state
         return AttemptExecution(
             None,
             ProviderAttemptV3(
                 attempt_id=self._attempt_id(context, started),
                 provider=context.provider,
                 capability=context.capability,
-                outcome=AttemptOutcome.FAILED,
+                outcome=(AttemptOutcome.CANCELLED if deadline_aborted else AttemptOutcome.FAILED),
                 retry_count=len(tries) - 1,
                 result_count=0,
                 started_at=self._started_at(started),
@@ -210,7 +220,7 @@ class AttemptEngine:
                 error=error,
                 budget_decision=budget_decision,
                 circuit_state_before=before,
-                circuit_state_after=after_record.state,
+                circuit_state_after=after,
                 endpoint_id=f"{context.provider}:{context.capability.value}",
                 decision="attempted",
                 tries=tries,
@@ -345,7 +355,10 @@ class AttemptEngine:
         for index in range(self.max_attempts):
             if (
                 context.deadline_monotonic is not None
-                and time.monotonic() >= context.deadline_monotonic
+                and (
+                    time.monotonic() >= context.deadline_monotonic
+                    or (index > 0 and time.monotonic() + _MIN_RETRY_WINDOW_SECONDS > context.deadline_monotonic)
+                )
             ):
                 return self._stopped(
                     context,
@@ -460,6 +473,26 @@ class AttemptEngine:
                 with request_deadline_scope(context.deadline_monotonic):
                     payload = operation()
             except BaseException as exc:
+                if isinstance(exc, RequestDeadlineExceeded):
+                    # No dispatch on this try: return both reservations, but
+                    # keep any earlier paid failure in the attempt receipt.
+                    self.store.release_budget(
+                        context.budget_scope, context.budget_window,
+                        units=context.budget_units,
+                    )
+                    if daily_reserved:
+                        self.store.release_budget(
+                            context.daily_budget_scope or "", context.daily_budget_window or "",
+                            units=context.budget_units,
+                        )
+                    self._release_lease(context, decision, int(now()))
+                    return self._stopped(
+                        context, tries=tries, last_error=last_error,
+                        attempt_started_monotonic=attempt_started_monotonic,
+                        before=before, now=now, started=started, retry_count=len(tries),
+                        state=decision.circuit_state, reason=SkipReason.DEADLINE_EXCEEDED,
+                        budget_decision="not_reserved" if self.store.available else "store_unavailable",
+                    )
                 reconciled = self.store.commit_budget(
                     context.budget_scope,
                     context.budget_window,
@@ -495,9 +528,14 @@ class AttemptEngine:
                         "error": self._try_error(classified),
                     }
                 )
+                deadline_aborted = is_request_deadline_abort(
+                    exc, deadline_monotonic=context.deadline_monotonic
+                )
+                if deadline_aborted:
+                    self._release_lease(context, decision, int(now()))
                 retry_wait = (
                     self._retry_wait(context, classified, index)
-                    if classified.retryable and index < self.max_attempts - 1
+                    if not deadline_aborted and classified.retryable and index < self.max_attempts - 1
                     else None
                 )
                 if retry_wait is not None:
@@ -512,6 +550,7 @@ class AttemptEngine:
                     budget_decision=budget_decision,
                     before=before,
                     now=now,
+                    deadline_aborted=deadline_aborted,
                 )
 
             reconciled = self.store.commit_budget(

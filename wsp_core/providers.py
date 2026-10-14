@@ -18,11 +18,13 @@ from .http_client import (
     DEFAULT_USER_AGENT,
     NOT_TRIED_DEADLINE_ERROR,
     ProviderRequestError,
+    RequestDeadlineExceeded,
     TRANSIENT_HTTP_CODES,
     _read_json_response,
     deadline_passed,
     make_get_request,
     make_request,
+    remaining_seconds,
     urlopen,
 )
 from .errors_v3 import classify_provider_error
@@ -514,8 +516,15 @@ class _CallPacer:
             start = max(now, self._next_slot)
             if start - now > max_wait:
                 start = now
-            self._last_start = start
-            self._next_slot = start + self.interval
+            remaining = remaining_seconds()
+            deadline_limited = remaining is not None and remaining <= start - now
+            if not deadline_limited:
+                self._last_start = start
+                self._next_slot = start + self.interval
+        if deadline_limited and remaining is not None:
+            # Do not reserve a slot that this caller cannot use.
+            time.sleep(max(0.0, remaining))
+            raise RequestDeadlineExceeded()
         if start > now:
             time.sleep(start - now)
 
@@ -1621,6 +1630,8 @@ def search_you(
         reason = str(getattr(e, "reason", e))
         is_timeout = isinstance(getattr(e, "reason", None), socket.timeout) or "timed out" in reason.lower()
         raise ProviderRequestError(f"Network error: {reason}. Check your internet connection.", transient=is_timeout)
+    except RequestDeadlineExceeded:
+        raise
     except (TimeoutError, socket.timeout):
         raise ProviderRequestError("You.com request timed out after 30s.", transient=True)
 
@@ -1764,6 +1775,8 @@ def search_searxng(
         reason = str(getattr(e, "reason", e))
         is_timeout = isinstance(getattr(e, "reason", None), socket.timeout) or "timed out" in reason.lower()
         raise ProviderRequestError(f"Cannot reach SearXNG instance at {instance_url}. Error: {reason}", transient=is_timeout)
+    except RequestDeadlineExceeded:
+        raise
     except (TimeoutError, socket.timeout):
         raise ProviderRequestError("SearXNG request timed out after 30s. Check instance health.", transient=True)
 

@@ -36,7 +36,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import List, Dict, Any, Optional, Tuple
 from .daemon_tasks import DaemonTask
-from .http_client import ProviderRequestError, request_timeout_cap
+from .http_client import ProviderRequestError, is_request_deadline_abort, request_timeout_cap
 from .cache import (
     CACHE_DIR,
     DEFAULT_CACHE_TTL,
@@ -1243,10 +1243,10 @@ def _execute_search_request_core(args, config: Dict[str, Any]) -> Tuple[Dict[str
                 provider_result = execute_search(prov)
             else:
                 provider_result = execute_provider_with_retry(prov, lambda: execute_search(prov))
-        except ProviderRequestError:
-            # Only real provider interactions count as performance signal;
-            # config/validation errors (e.g. missing keys) are not recorded.
-            record_provider_outcome(prov, latency_seconds=time.monotonic() - started, result_count=0, error=True)
+        except ProviderRequestError as exc:
+            # Caller-imposed deadlines are not provider performance samples.
+            if not is_request_deadline_abort(exc):
+                record_provider_outcome(prov, latency_seconds=time.monotonic() - started, result_count=0, error=True)
             raise
         record_provider_outcome(
             prov,
