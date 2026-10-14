@@ -557,6 +557,7 @@ def _execute_extract_v3(
     succeeded: Dict[int, Dict[str, Any]] = {}
     failed: Dict[int, Dict[str, Any]] = {}
     serving_providers = []
+    provider_payloads: Dict[str, Dict[str, Any]] = {}
     unmatched_results: List[Dict[str, Any]] = []
 
     for provider in plan.candidate_order:
@@ -594,6 +595,7 @@ def _execute_extract_v3(
         attempted = engine.execute(context, operation)
         receipts.append(attempted.receipt)
         if attempted.payload is not None:
+            provider_payloads[provider] = attempted.payload
             if payload is None:
                 payload = attempted.payload
                 successful_provider = provider
@@ -633,7 +635,12 @@ def _execute_extract_v3(
         )
         fallback_errors.append({"provider": provider, "error": error_code})
 
-    if payload is not None and not succeeded:
+    if serving_providers:
+        # Provenance belongs to the last contributor, not the first provider
+        # to return a payload (which may contain only unrelated items).
+        successful_provider = serving_providers[-1]
+        payload = {**provider_payloads[successful_provider], "provider": successful_provider}
+    elif payload is not None:
         payload = None
     if payload is None:
         payload = {
@@ -673,12 +680,6 @@ def _execute_extract_v3(
             # Content a provider returned for no requested URL. It is not
             # attributed to one; this note keeps it from vanishing silently.
             payload["unmatched_results"] = unmatched_results
-        if merged:
-            # The receipt names one selected provider: the last one the
-            # fallback reached. Earlier contributors are recorded as
-            # attempts with insufficient results.
-            successful_provider = serving_providers[-1]
-            payload["provider"] = successful_provider
         # Failures after the selected provider (retrying leftover URLs) stay
         # in the attempt receipts; fallback_errors lists what preceded it.
         selected_index = plan.candidate_order.index(successful_provider)
