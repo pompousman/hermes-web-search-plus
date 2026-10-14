@@ -19,6 +19,7 @@ from .contract_v3 import (
 )
 from .credentials import is_secret_scope_error
 from .errors_v3 import classify_provider_error
+from .http_client import request_deadline_scope
 from .provider_health import MAX_RETRY_AFTER_WAIT_SECONDS, _retry_delay
 from .state_store_v3 import CircuitKey, SQLiteStateStore
 
@@ -340,7 +341,10 @@ class AttemptEngine:
             try_started = int(now())
             call_started = time.monotonic()
             try:
-                payload = operation()
+                # Adapters check this deadline before each HTTP request, so a
+                # batch or an adapter retry starts nothing after it.
+                with request_deadline_scope(context.deadline_monotonic):
+                    payload = operation()
             except BaseException as exc:
                 if reserved:
                     reconciled = self.store.commit_budget(

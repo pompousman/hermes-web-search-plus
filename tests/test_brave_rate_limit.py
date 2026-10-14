@@ -1,12 +1,16 @@
-"""Brave per-second pacing, one short 429 retry, and placeholder keys."""
+"""Brave per-second pacing, the engine-owned 429 retry, and placeholder keys."""
 import os
+import time
 from unittest import mock
 
 import pytest
 
 from wsp_core import config as config_module
 from wsp_core import env_loader, providers
+from wsp_core.attempt_engine_v3 import AttemptContext, AttemptEngine
+from wsp_core.contract_v3 import Capability
 from wsp_core.http_client import ProviderRequestError
+from wsp_core.state_store_v3 import SQLiteStateStore
 
 POLICY = {
     "X-RateLimit-Policy": "1;w=1, 2000;w=2678400",
@@ -48,15 +52,56 @@ def test_policy_parsing():
     assert providers.brave_retry_wait(monthly) == 2014658
 
 
-def test_429_on_per_second_window_retries_once_after_reset():
+def _brave_engine(tmp_path, *, max_attempts=2, deadline=None, sleeps=None):
+    store = SQLiteStateStore(tmp_path / "state.sqlite3")
+    engine = AttemptEngine(
+        store,
+        max_attempts=max_attempts,
+        sleep=(sleeps.append if sleeps is not None else (lambda _seconds: None)),
+    )
+    context = AttemptContext(
+        "brave", Capability.SEARCH, "provider://brave/search", "fingerprint",
+        "brave-request", "request", deadline_monotonic=deadline,
+    )
+    return engine, context
+
+
+def test_429_on_per_second_window_is_one_call_carrying_the_reset_wait():
+    fake = FakeBrave([(429, POLICY)])
+    with mock.patch.object(providers, "make_get_request", fake), \
+         mock.patch.object(providers.time, "sleep") as sleep:
+        with pytest.raises(ProviderRequestError) as caught:
+            providers.search_brave("q", "brave-test-key")
+    # No adapter-internal retry: the engine retries, visibly and within the deadline.
+    assert fake.calls == 1
+    sleep.assert_not_called()
+    assert caught.value.retry_after == pytest.approx(1.0)
+
+
+def test_engine_retries_brave_429_after_reset_as_a_second_try(tmp_path):
     fake = FakeBrave([(429, POLICY), (200, POLICY)])
     sleeps = []
-    with mock.patch.object(providers, "make_get_request", fake), \
-         mock.patch.object(providers.time, "sleep", sleeps.append):
-        result = providers.search_brave("q", "brave-test-key")
+    engine, context = _brave_engine(tmp_path, sleeps=sleeps)
+    with mock.patch.object(providers, "make_get_request", fake):
+        execution = engine.execute(context, lambda: providers.search_brave("q", "brave-test-key"))
     assert fake.calls == 2
-    assert result["results"][0]["url"] == "https://a.example/"
-    assert sleeps and sleeps[0] == pytest.approx(1.0)
+    assert execution.payload["results"][0]["url"] == "https://a.example/"
+    assert sleeps == [pytest.approx(1.0)]
+    assert [t["outcome"] for t in execution.receipt.tries] == ["error", "success"]
+    assert execution.receipt.tries[0]["error"]["error_class"] == "rate_limit"
+    # Each dispatch is a reserved budget unit of the request.
+    assert engine.store.get_budget("brave-request", "request").used_units == 2
+
+
+def test_brave_429_retry_never_starts_after_the_deadline(tmp_path):
+    fake = FakeBrave([(429, POLICY), (200, POLICY)])
+    # The 1 s reset wait would end past the deadline: no second request.
+    engine, context = _brave_engine(tmp_path, deadline=time.monotonic() + 0.5)
+    with mock.patch.object(providers, "make_get_request", fake):
+        execution = engine.execute(context, lambda: providers.search_brave("q", "brave-test-key"))
+    assert fake.calls == 1
+    assert execution.payload is None
+    assert len(execution.receipt.tries) == 1
 
 
 def test_spent_monthly_quota_fails_fast_for_fallback():
@@ -70,13 +115,13 @@ def test_spent_monthly_quota_fails_fast_for_fallback():
     sleep.assert_not_called()
 
 
-def test_second_429_is_raised_not_retried_forever():
+def test_second_429_is_raised_not_retried_forever(tmp_path):
     fake = FakeBrave([(429, POLICY), (429, POLICY)])
-    with mock.patch.object(providers, "make_get_request", fake), \
-         mock.patch.object(providers.time, "sleep"):
-        with pytest.raises(ProviderRequestError):
-            providers.search_brave("q", "brave-test-key")
+    engine, context = _brave_engine(tmp_path)
+    with mock.patch.object(providers, "make_get_request", fake):
+        execution = engine.execute(context, lambda: providers.search_brave("q", "brave-test-key"))
     assert fake.calls == 2
+    assert execution.payload is None
 
 
 def test_pacer_spaces_calls_after_learning_the_policy():

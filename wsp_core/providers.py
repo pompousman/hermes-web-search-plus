@@ -16,9 +16,11 @@ from urllib.request import Request
 from .daemon_tasks import DaemonTask
 from .http_client import (
     DEFAULT_USER_AGENT,
+    NOT_TRIED_DEADLINE_ERROR,
     ProviderRequestError,
     TRANSIENT_HTTP_CODES,
     _read_json_response,
+    deadline_passed,
     make_get_request,
     make_request,
     urlopen,
@@ -530,32 +532,36 @@ _BRAVE_PACER = _CallPacer()
 
 
 def _brave_get(url: str, headers: Dict[str, str]) -> dict:
-    """GET a Brave endpoint, paced to its per-second limit, one retry on 429."""
-    for attempt in range(2):
-        _BRAVE_PACER.wait_turn(BRAVE_MAX_RATE_WAIT_SECONDS)
-        seen: Dict[str, str] = {}
-        try:
-            data = make_get_request(
-                url,
-                dict(headers),
-                capture_headers=_BRAVE_RATE_HEADERS,
-                response_headers=seen,
-            )
-        except ProviderRequestError as exc:
-            _BRAVE_PACER.learn(brave_min_interval(seen))
-            wait = brave_retry_wait(seen)
-            if (
-                attempt == 0
-                and getattr(exc, "status_code", None) == 429
-                and wait is not None
-                and wait <= BRAVE_MAX_RATE_WAIT_SECONDS
-            ):
-                time.sleep(wait)
-                continue
-            raise
+    """GET a Brave endpoint once, paced to its per-second limit.
+
+    A 429 on the per-second window is not retried here: the error carries the
+    window's reset time as ``retry_after`` and the attempt engine retries it.
+    That retry respects the request deadline and budget and shows up as its
+    own try in the receipt, which an adapter-internal retry did not.
+    """
+    _BRAVE_PACER.wait_turn(BRAVE_MAX_RATE_WAIT_SECONDS)
+    seen: Dict[str, str] = {}
+    try:
+        data = make_get_request(
+            url,
+            dict(headers),
+            capture_headers=_BRAVE_RATE_HEADERS,
+            response_headers=seen,
+        )
+    except ProviderRequestError as exc:
         _BRAVE_PACER.learn(brave_min_interval(seen))
-        return data
-    raise AssertionError("unreachable")  # pragma: no cover
+        wait = brave_retry_wait(seen)
+        if (
+            getattr(exc, "status_code", None) == 429
+            and getattr(exc, "retry_after", None) is None
+            and wait is not None
+            and wait <= BRAVE_MAX_RATE_WAIT_SECONDS
+        ):
+            # Only a short per-second window; a spent monthly quota fails fast.
+            exc.retry_after = wait
+        raise
+    _BRAVE_PACER.learn(brave_min_interval(seen))
+    return data
 
 
 def search_brave(
@@ -1016,6 +1022,11 @@ _PROVIDER_WIDE_ERROR_CLASSES = frozenset(
 )
 
 
+def _not_tried_extract_result(provider: str, url: str) -> Dict[str, Any]:
+    """Error item for a batch URL skipped because the request deadline passed."""
+    return _normalize_extract_result(provider, url, error=NOT_TRIED_DEADLINE_ERROR)
+
+
 def _per_url_extract_error(provider: str, url: str, label: str, exc: ProviderRequestError) -> Dict[str, Any]:
     """Turn one URL's fetch error into an error item, or re-raise account-wide errors."""
     if classify_provider_error(exc, provider=provider).error_class in _PROVIDER_WIDE_ERROR_CLASSES:
@@ -1052,6 +1063,10 @@ def extract_firecrawl(
     results: List[Dict[str, Any]] = []
     first_error: Optional[ProviderRequestError] = None
     for url in urls:
+        if deadline_passed():
+            # Pages already fetched are kept; no new request after the deadline.
+            results.append(_not_tried_extract_result("firecrawl", url))
+            continue
         body: Dict[str, Any] = {"url": url, "formats": formats}
         if render_js:
             body["waitFor"] = 1000
@@ -1110,6 +1125,9 @@ def extract_linkup(
     headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
 
     def fetch_one(url: str) -> Dict[str, Any]:
+        if deadline_passed():
+            # DaemonTask copies the context, so queued fetches see the deadline.
+            return _not_tried_extract_result("linkup", url)
         body = {
             "url": url,
             "extractImages": include_images,
@@ -1883,6 +1901,9 @@ def extract_keenable(
 
     results: List[Dict[str, Any]] = []
     for url in urls:
+        if deadline_passed():
+            results.append(_not_tried_extract_result("keenable", url))
+            continue
         try:
             endpoint = f"{base_url}?url={quote(url, safe='')}"
             data = make_get_request(endpoint, headers, timeout=timeout)
@@ -1925,6 +1946,9 @@ def extract_serper(
     headers = {"X-API-KEY": api_key, "Content-Type": "application/json"}
     results: List[Dict[str, Any]] = []
     for url in urls:
+        if deadline_passed():
+            results.append(_not_tried_extract_result("serper", url))
+            continue
         try:
             data = make_request(api_url, headers, {"url": url, "includeMarkdown": True}, timeout=timeout)
             if data.get("error"):

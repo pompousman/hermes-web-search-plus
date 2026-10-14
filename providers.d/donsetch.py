@@ -27,7 +27,15 @@ import time
 from typing import Any
 from urllib.parse import urlsplit
 
-from wsp_sdk import ProviderSpec, extract_result, search_result, source_result
+from wsp_sdk import (
+    ProviderSpec,
+    RequestDeadlineExceeded,
+    deadline_passed,
+    dispatch_timeout,
+    extract_result,
+    search_result,
+    source_result,
+)
 
 _ALLOWED_OUTPUT_FORMATS = {"markdown"}
 _ALLOWED_SEARCH_TYPES = {"search", "news"}
@@ -687,6 +695,8 @@ def execute_search(search_module, prov, args, key, config, routing_info):
     include_domains = _clean_string_list(getattr(args, "include_domains", None))
     exclude_domains = _clean_string_list(getattr(args, "exclude_domains", None))
     max_results = _bounded_int(getattr(args, "max_results", 7), 7, 1, 12)
+    # The session deadline follows the engine's attempt cap and request deadline.
+    timeout_seconds = dispatch_timeout(timeout_seconds)
     payload = _call_donsetch_tool(
         binary,
         "web_search",
@@ -894,9 +904,17 @@ def execute_extract(
         tier = "auto"
 
     projected = []
+    # The session deadline follows the engine's attempt cap and request deadline.
+    timeout_seconds = dispatch_timeout(timeout_seconds)
     try:
         with DonsetchSession(binary, timeout_seconds) as session:
             for requested_url in [str(url) for url in urls]:
+                if deadline_passed():
+                    # Fetched pages are kept; no new fetch after the deadline.
+                    projected.append(
+                        {"url": requested_url, "error": str(RequestDeadlineExceeded()), "status": 0}
+                    )
+                    continue
                 payload = session.call(
                     "web_fetch",
                     {

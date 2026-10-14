@@ -19,6 +19,7 @@ from wsp_sdk import (
     ProviderConfigError,
     ProviderRequestError,
     ProviderSpec,
+    dispatch_timeout,
     register_provider,
     search_result,
     source_result,
@@ -106,6 +107,9 @@ def _request(body: Mapping[str, Any], api_key: str, timeout: int) -> dict[str, A
         },
         method="POST",
     )
+    # Own transport: apply the engine's per-attempt cap and request deadline
+    # like the shared HTTP client does (raises once the deadline has passed).
+    timeout = dispatch_timeout(timeout)
     try:
         with _open_request(request, timeout) as response:
             payload = _read_payload(response)
