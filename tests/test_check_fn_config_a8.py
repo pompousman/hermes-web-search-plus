@@ -92,7 +92,15 @@ def test_config_json_searxng_base_url_enables_search_only(config_path, public_dn
     assert _check(ctx, "web_extract_plus") is False
 
 
-def test_desktop_searxng_url_enables_search(tmp_path, monkeypatch, public_dns):
+@pytest.mark.parametrize("scoped", [False, True])
+def test_desktop_searxng_url_enables_search(tmp_path, monkeypatch, public_dns, scoped):
+    from wsp_core.credentials import set_secret_resolver
+
+    # Desktop's shared file is usable only on standalone/old hosts. A profile
+    # with no endpoint must not inherit another profile's URL from that file.
+    monkeypatch.setattr(wsp, "_install_hermes_secret_resolver", lambda: set_secret_resolver(
+        (lambda _name, default=None: default) if scoped else None
+    ))
     # Hermes Desktop settings are read only for <home>/plugins/config.json and <home>/config.yaml.
     plugins_dir = tmp_path / "plugins"
     plugins_dir.mkdir()
@@ -112,7 +120,7 @@ def test_desktop_searxng_url_enables_search(tmp_path, monkeypatch, public_dns):
 
     ctx = _register()
 
-    assert _check(ctx, "web_search_plus") is True
+    assert _check(ctx, "web_search_plus") is (not scoped)
     assert _check(ctx, "web_extract_plus") is False
 
 

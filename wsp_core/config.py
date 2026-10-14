@@ -1058,7 +1058,7 @@ def keyless_public_allowed(provider: str, config: Dict[str, Any] = None) -> bool
     if not (spec and spec.keyless):
         return False
     section = (config or {}).get(spec.config_section, {})
-    if isinstance(section, dict) and is_truthy(section.get("allow_public")):
+    if file_credentials_allowed() and isinstance(section, dict) and is_truthy(section.get("allow_public")):
         return True
     return is_truthy(get_secret(keyless_public_env_var(provider)))
 
@@ -1174,7 +1174,8 @@ def get_searxng_instance_url(config: Dict[str, Any] = None) -> Optional[str]:
     """Get SearXNG instance URL from config or environment.
 
     SearXNG is self-hosted, so no API key needed - just the instance URL.
-    Priority: config.json searxng.base_url > legacy instance_url >
+    Under a host resolver only the profile's SEARXNG_INSTANCE_URL is used.
+    Standalone priority: config.json searxng.base_url > legacy instance_url >
     SEARXNG_INSTANCE_URL environment variable.
 
     Security: the URL is validated to prevent SSRF: http/https only, cloud
@@ -1183,8 +1184,8 @@ def get_searxng_instance_url(config: Dict[str, Any] = None) -> Optional[str]:
     SEARXNG_ALLOW_PRIVATE=1. ``provider_configured`` treats such a URL as
     "not configured"; an explicit searxng request raises the error.
     """
-    # Check config.json first
-    if config:
+    # Shared endpoints may contain credentials and must not cross profiles.
+    if config and file_credentials_allowed():
         searxng_config = config.get("searxng", {})
         if isinstance(searxng_config, dict):
             url = searxng_config.get("base_url") or searxng_config.get("instance_url")
