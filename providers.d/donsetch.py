@@ -908,22 +908,35 @@ def execute_extract(
     timeout_seconds = dispatch_timeout(timeout_seconds)
     try:
         with DonsetchSession(binary, timeout_seconds) as session:
-            for requested_url in [str(url) for url in urls]:
+            requested_urls = [str(url) for url in urls]
+            for index, requested_url in enumerate(requested_urls):
                 if deadline_passed():
                     # Fetched pages are kept; no new fetch after the deadline.
                     projected.append(
                         {"url": requested_url, "error": str(RequestDeadlineExceeded()), "status": 0}
                     )
                     continue
-                payload = session.call(
-                    "web_fetch",
-                    {
-                        "url": requested_url,
-                        "max_chars": max_chars,
-                        "media": bool(include_images),
-                        "tier": tier,
-                    },
-                )
+                try:
+                    payload = session.call(
+                        "web_fetch",
+                        {
+                            "url": requested_url,
+                            "max_chars": max_chars,
+                            "media": bool(include_images),
+                            "tier": tier,
+                        },
+                    )
+                except TimeoutError:
+                    if not any(not item.get("error") for item in projected):
+                        raise
+                    projected.append({"url": requested_url, "error": "donsetch_timeout", "status": 0})
+                    projected.extend(
+                        {"url": url, "error": str(RequestDeadlineExceeded()), "status": 0}
+                        for url in requested_urls[index + 1:]
+                    )
+                    # A late MCP reply can no longer be paired safely. Exit the
+                    # session (and reap its child) without discarding earlier pages.
+                    break
                 result = _project_fetch_item(payload, requested_url)
                 if include_raw_html and not result.get("error"):
                     # DonSeTch deliberately returns Markdown; do not label it HTML.
