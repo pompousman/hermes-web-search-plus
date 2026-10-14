@@ -22,7 +22,10 @@ def backend(monkeypatch):
     )
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
+    from wsp_core import extract
+
     engine = SimpleNamespace(
+        _extract=extract,
         load_config=lambda: {"auto_routing": {}},
         provider_configured=lambda *args: True,
         SEARCH_PROVIDER_IDS=("fixture",), EXTRACT_PROVIDER_IDS=("fixture",),
@@ -151,10 +154,10 @@ def test_exception_redaction(backend, caplog):
 def test_extract_association_and_missing_failures(backend):
     backend.plugin._run_extract.return_value = {"results": [
         {"url": "https://foreign.invalid", "content": "foreign"},
-        {"url": "https://second.invalid", "content": "second"},
+        {"url": "https://example.org/second", "content": "second"},
         {"url": "https://example.org", "error": "secret-dummy"},
     ]}
-    urls = ["https://example.org", "https://missing.invalid", "https://second.invalid"]
+    urls = ["https://example.org", "https://example.org/missing", "https://example.org/second"]
     result = backend.value.extract(urls)
     assert [r["url"] for r in result] == urls
     assert result[0]["error"] and result[1]["error"]
@@ -205,9 +208,9 @@ def test_extract_refused_url_in_mixed_batch_is_marked_only_for_that_url(backend)
         {"url": "https://example.org", "content": "ok"},
         {"url": "http://localhost/", "title": "", "content": "",
          "error": "Extraction URL blocked: localhost is private/internal"},
-        {"url": "https://down.invalid", "content": "", "error": "provider boom"},
+        {"url": "https://example.org/down", "content": "", "error": "provider boom"},
     ]}
-    rows = backend.value.extract(["https://example.org", "http://localhost/", "https://down.invalid"])
+    rows = backend.value.extract(["https://example.org", "http://localhost/", "https://example.org/down"])
     assert "blocked_by_policy" not in rows[0] and rows[0]["content"] == "ok"
     assert _refused(rows[1])
     # An ordinary provider failure must stay rescuable: no policy marker.
@@ -215,9 +218,10 @@ def test_extract_refused_url_in_mixed_batch_is_marked_only_for_that_url(backend)
 
 
 def test_extract_ordinary_failures_never_get_policy_marker(backend):
+    # Only valid public URLs are rescuable. Invalid/non-HTTP input must not
+    # be forwarded to third-party rescue backends either.
     for payload in (
         {"results": [], "error": "All extraction providers failed"},
-        {"results": [], "error": "Invalid URL — must start with http:// or https://: ['x']"},
         {"results": [{"url": "https://example.org", "error": "timeout"}]},
     ):
         backend.plugin._run_extract.return_value = payload

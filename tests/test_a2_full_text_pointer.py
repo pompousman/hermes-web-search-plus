@@ -221,7 +221,10 @@ def test_native_backend_marks_budget_truncation_and_never_claims_full(tmp_path, 
     )
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
+    from wsp_core import extract
+
     engine = SimpleNamespace(
+        _extract=extract,
         load_config=lambda: {"auto_routing": {}},
         provider_configured=lambda *args: True,
         SEARCH_PROVIDER_IDS=("fixture",), EXTRACT_PROVIDER_IDS=("fixture",),

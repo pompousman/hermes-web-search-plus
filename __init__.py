@@ -1879,9 +1879,18 @@ def _run_extract(
     try:
         return _call_with_timeout(call, timeout)
     except FuturesTimeout:
-        return {"error": f"Extract timed out after {timeout}s", "provider": provider, "results": []}
+        failure = {"error": f"Extract timed out after {timeout}s", "provider": provider, "results": []}
     except Exception as e:
-        return {"error": str(e), "provider": provider, "results": [], **_scope_error_type(e)}
+        failure = {"error": str(e), "provider": provider, "results": [], **_scope_error_type(e)}
+    # The wrapper may fail before the engine can return its refusal metadata.
+    try:
+        checked = search._extract._check_extract_urls(urls, search.load_config())
+        refused = [url for url, _validated, error in checked if error is not None]
+        if refused:
+            failure["refused_urls"] = refused
+    except Exception:
+        pass  # Preserve the original failure (including credential-scope errors).
+    return failure
 
 
 def _source_total_chars(src: dict, shown: int) -> int:

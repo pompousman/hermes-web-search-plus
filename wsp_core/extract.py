@@ -311,6 +311,12 @@ def _validate_extract_urls(urls: List[str], config: Optional[Dict[str, Any]] = N
     final fetcher; that needs a fetcher-side egress policy.
     """
     config = config or {}
+    # Scheme spelling and surrounding whitespace do not change URL policy.
+    urls = [
+        u.strip().partition(":")[0].lower() + ":" + u.strip().partition(":")[2]
+        if isinstance(u, str) and ":" in u else u
+        for u in urls
+    ]
     invalid = [u for u in urls if not (isinstance(u, str) and u.startswith(("http://", "https://")))]
     if invalid:
         raise ValueError(f"Invalid URL(s) — must start with http:// or https://: {invalid}")
@@ -518,6 +524,7 @@ def _execute_extract_v3(
                 "provider": requested,
                 "results": [],
                 "error": "; ".join(messages),
+                "refused_urls": [url for url, _validated, error in checked if error is not None],
                 "requested_provider": requested,
             },
             stages=(),
@@ -635,6 +642,9 @@ def _execute_extract_v3(
             "error": "All extraction providers failed",
             "fallback_errors": fallback_errors,
         }
+        refused_urls = [url for url, _validated, error in checked if error is not None]
+        if refused_urls:
+            payload["refused_urls"] = refused_urls
         add_provider_setup_guidance(payload, "extract", list(plan.candidate_order), config,
                                     requested_provider=str(request.routing.get("provider") or "auto"))
     else:

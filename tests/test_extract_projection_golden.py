@@ -179,7 +179,7 @@ def _native_rows(rows):
 @pytest.mark.parametrize("case", CASES, ids=[case["name"] for case in CASES])
 def test_native_backend_matches_golden(case, native_module):
     plugin = SimpleNamespace(
-        _load_search_module=lambda: object(),
+        _load_search_module=lambda: SimpleNamespace(_extract=extract, load_config=extract.load_config),
         _run_extract=lambda urls, provider="auto", output_format="markdown": extract.extract_plus(
             urls, provider="tavily", output_format=output_format
         ),
@@ -193,7 +193,7 @@ def test_native_backend_matches_golden(case, native_module):
 
 def test_native_backend_reports_an_error_row_not_malformed_content(native_module):
     plugin = SimpleNamespace(
-        _load_search_module=lambda: object(),
+        _load_search_module=lambda: SimpleNamespace(_extract=extract, load_config=extract.load_config),
         _run_extract=lambda *a, **kw: {
             "results": [{"url": "https://example.com/a", "error": "blocked URL", "content": None}]
         },

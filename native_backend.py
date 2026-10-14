@@ -289,6 +289,21 @@ class WSPNativeBackend(WebSearchProvider):
                 for url in url_list
             ]
 
+        # Keep policy refusals outside provider execution: even a timeout or
+        # malformed engine response must not make these URLs rescuable.
+        try:
+            engine = self.plugin._load_search_module()
+            checked = engine._extract._check_extract_urls(url_list, engine.load_config())
+        except Exception:  # noqa: BLE001 — never dispatch without URL validation
+            return [{"url": url, "error": "WSP native URL validation failed"} for url in url_list]
+        accepted = [validated for _url, validated, error in checked if error is None]
+        rows = iter(self._extract_accepted(accepted, kwargs) if accepted else [])
+        return [
+            _refused_entry(url) if error is not None else {**next(rows), "url": url}
+            for url, _validated, error in checked
+        ]
+
+    def _extract_accepted(self, url_list: List[str], kwargs: Dict[str, Any]) -> List[Dict[str, Any]]:
         run = getattr(self.plugin, "_run_extract")
         output_format = kwargs.get("format") or "markdown"
         try:
