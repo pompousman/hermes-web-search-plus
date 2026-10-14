@@ -820,7 +820,18 @@ def _write_behavior_config(path: Path, data: Mapping[str, Any], *, dry_run: bool
                 auto.pop(field, None)
             merged["auto_routing"] = auto
     if dry_run:
-        print(json.dumps(redact_secrets(merged), indent=2, sort_keys=True) + "\n", end="")
+        def changed(before: Mapping[str, Any], after: Mapping[str, Any]) -> Dict[str, Any]:
+            delta: Dict[str, Any] = {key: None for key in before if key not in after}
+            for key, value in after.items():
+                if key not in before or before[key] != value:
+                    if isinstance(value, Mapping) and isinstance(before.get(key), Mapping):
+                        value = changed(before[key], value)
+                    delta[key] = value
+            return delta
+
+        # Compare effective values, not defaults newly materialized on disk.
+        preview = changed(_load_behavior_config(path), _merge_behavior_config(merged))
+        print(json.dumps(redact_secrets(preview), indent=2, sort_keys=True) + "\n", end="")
         return
     if backup and path.exists():
         backup_path = _unique_timestamped_path(path, "bak")

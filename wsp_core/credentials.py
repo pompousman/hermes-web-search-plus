@@ -16,6 +16,7 @@ from __future__ import annotations
 import os
 import re
 from typing import Any, Callable, Mapping, Optional
+from urllib.parse import urlsplit, urlunsplit
 
 SecretResolver = Callable[[str, Optional[str]], Optional[str]]
 
@@ -80,14 +81,29 @@ def is_secret_scope_error(exc: BaseException) -> bool:
     return bool(getattr(exc, _SCOPE_ERROR_MARK, False))
 
 
-_SECRET_KEY_RE = re.compile(r"(^|_)(api_?key|token|secret|password|passwd|authorization|credentials?)$|_api_key$", re.I)
+_SECRET_KEY_RE = re.compile(r"(^|_)(key|api_?keys?|auth|token|secret|password|passwd|authorization|credentials?)$", re.I)
 _SECRET_KEY_CAMEL_RE = re.compile(r"(apikey|accesstoken|authtoken|clientsecret|secretkey|bearer)$", re.I)
 
 
 def is_secret_field(name: Any) -> bool:
     """Whether a config/JSON field name holds a secret (``api_key``, ``apiKey``, ``*_API_KEY``, ...)."""
-    text = str(name)
+    # Only complete names/suffixes match, never substrings such as keyless.
+    text = str(name).replace("-", "_")
     return bool(_SECRET_KEY_RE.search(text) or _SECRET_KEY_CAMEL_RE.search(text.replace("_", "")))
+
+
+def redact_url(value: str, *, origin_only: bool = False) -> str:
+    """Remove URL credentials, query and fragment; optionally keep only the origin."""
+    try:
+        parsed = urlsplit(value)
+        host = parsed.hostname
+        if not parsed.scheme or not host:
+            return "[redacted URL]"
+        host = f"[{host}]" if ":" in host else host
+        authority = f"{host}:{parsed.port}" if parsed.port is not None else host
+        return urlunsplit((parsed.scheme, authority, "" if origin_only else parsed.path, "", ""))
+    except ValueError:
+        return "[redacted URL]"
 
 
 def redact_secrets(value: Any) -> Any:
@@ -99,8 +115,12 @@ def redact_secrets(value: Any) -> Any:
     if isinstance(value, Mapping):
         out = {}
         for key, item in value.items():
-            if is_secret_field(key) and not isinstance(item, (Mapping, list, tuple)):
-                out[key] = "set" if (item not in (None, "", False)) else "not set"
+            if is_secret_field(key):
+                out[key] = "set" if item else "not set"
+            elif isinstance(item, str) and str(key).lower().replace("-", "_") in {
+                "base_url", "instance_url", "searxng_instance_url", "endpoint", "url",
+            }:
+                out[key] = redact_url(item) if item else item
             else:
                 out[key] = redact_secrets(item)
         return out
