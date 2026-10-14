@@ -95,3 +95,23 @@ def test_only_unmatched_results_are_a_diagnostic_provider_failure(monkeypatch):
     assert result.get("error")
     assert result["fallback_errors"] == [{"provider": "tavily", "error": "all_urls_failed"}]
     assert result["unmatched_results"] == [{"provider": "tavily", "url": "https://example.org/stray", "has_content": True}]
+
+
+def test_requested_url_stamp_is_dropped_when_url_was_not_rewritten(monkeypatch):
+    # Adapters stamp requested_url for matching; an unchanged URL must not
+    # leak it into tool output or block the extraction cache.
+    monkeypatch.setenv("KEENABLE_API_KEY", "test-key")
+    urls = ["https://example.org/a", "https://example.org/b"]
+
+    def answer(endpoint, *args, **kwargs):
+        requested = parse_qs(urlsplit(endpoint).query)["url"][0]
+        if requested.endswith("/b"):
+            return {"url": "https://example.com/redirect-b", "content": "paid b"}
+        return {"url": requested, "content": "paid a"}
+
+    monkeypatch.setattr(providers, "make_get_request", answer)
+    result = extract.extract_plus(urls, provider="keenable")
+    assert not result.get("error")
+    first, second = result["results"]
+    assert "requested_url" not in first
+    assert second["requested_url"] == urls[1]

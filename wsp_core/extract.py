@@ -684,6 +684,11 @@ def _execute_extract_v3(
                     item = {**item, "provider": provider}
             else:
                 item = failed.get(position) or _extract_error_item(urls[position], _EMPTY_EXTRACT_ERROR)
+            if isinstance(item, dict) and item.get("requested_url") == item.get("url"):
+                # Adapters stamp requested_url only so the matcher can pair
+                # redirects. Without a redirect it says nothing new; keeping
+                # it would change tool output and make the item uncacheable.
+                item = {key: value for key, value in item.items() if key != "requested_url"}
             results.append(item)
         payload = {**payload, "results": results}
         if pending and unmatched_results:
