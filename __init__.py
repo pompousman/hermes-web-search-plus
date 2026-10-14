@@ -43,7 +43,14 @@ from .wsp_core.provider_registry import (
     keyless_public_env_var,
     plugin_catalog,
 )
-from .wsp_core.credentials import get_secret, get_secret_resolver, is_secret_scope_error, set_secret_resolver
+from .wsp_core.credentials import (
+    file_credentials_allowed,
+    get_secret,
+    get_secret_resolver,
+    is_secret_scope_error,
+    redact_secrets,
+    set_secret_resolver,
+)
 from .wsp_core.env_loader import clean_env_value as _shared_clean_env_value, is_truthy
 from .wsp_core.cache import MAX_STORED_TEXT_CHARS, store_web_text
 from .wsp_core.config import (
@@ -52,7 +59,10 @@ from .wsp_core.config import (
     _apply_desktop_settings,
     _desktop_settings,
     _replace_pre_5_default_priority,
+    _warn_ignored_file_key,
     apply_profile_effects,
+    ignored_file_credential_notice,
+    ignored_file_credentials,
     load_config,
     provider_configured,
 )
@@ -125,6 +135,30 @@ def _ensure_hermes_secret_resolver() -> None:
         _install_hermes_secret_resolver()
 
 
+def _section_file_key(section: Mapping[str, Any]) -> str:
+    """The ``api_key``/``apiKey`` from a config.json section, or "" when a host resolver owns credentials."""
+    if not file_credentials_allowed():
+        return ""
+    return str(section.get("api_key") or section.get("apiKey") or "")
+
+
+def _raw_config_json(path: Path) -> Dict[str, Any]:
+    """config.json as written (any section), or {} when missing or unreadable; used only to detect ignored keys."""
+    try:
+        raw = json.loads(path.read_text() or "{}")
+    except (OSError, ValueError):
+        return {}
+    return raw if isinstance(raw, dict) else {}
+
+
+def _ignored_file_credential_lines(config: Optional[Mapping[str, Any]]) -> List[str]:
+    """Status lines for config.json keys that are ignored under Hermes (never the value); also warns once."""
+    providers = ignored_file_credentials(dict(config or {}))
+    for provider in providers:
+        _warn_ignored_file_key(provider)
+    return [ignored_file_credential_notice(provider) for provider in providers]
+
+
 def _provider_config_status(env: Optional[Mapping[str, str]] = None, config: Optional[Mapping[str, Any]] = None) -> Dict[str, Any]:
     """Describe configured providers by capability tier.
 
@@ -143,7 +177,7 @@ def _provider_config_status(env: Optional[Mapping[str, str]] = None, config: Opt
         section = (config or {}).get(spec.config_section, {})
         section = section if isinstance(section, Mapping) else {}
         configured = _clean_env_value(
-            str(section.get("api_key") or section.get("apiKey") or (section.get("binary") if spec.provider == "donsetch" else None) or env.get(key) or "")
+            str(_section_file_key(section) or (section.get("binary") if spec.provider == "donsetch" else None) or env.get(key) or "")
         ) is not None
         if spec.provider == "searxng":
             configured = _is_well_formed_http_url(section.get("base_url") or section.get("instance_url") or env.get(key))
@@ -725,9 +759,8 @@ def _write_behavior_config(path: Path, data: Mapping[str, Any], *, dry_run: bool
             ):
                 auto.pop(field, None)
             merged["auto_routing"] = auto
-    rendered = json.dumps(merged, indent=2, sort_keys=True) + "\n"
     if dry_run:
-        print(rendered, end="")
+        print(json.dumps(redact_secrets(merged), indent=2, sort_keys=True) + "\n", end="")
         return
     if backup and path.exists():
         backup_path = _unique_timestamped_path(path, "bak")
@@ -791,7 +824,7 @@ def _profile_status(config: Mapping[str, Any], env: Mapping[str, str]) -> Dict[s
     keenable = config.get("keenable", {}) if isinstance(config.get("keenable"), Mapping) else {}
     keenable_ready = bool(
         _clean_env_value(env.get("KEENABLE_API_KEY") or "")
-        or _clean_env_value(str(keenable.get("api_key") or keenable.get("apiKey") or ""))
+        or _clean_env_value(_section_file_key(keenable))
         or is_truthy(keenable.get("allow_public"))
         or is_truthy(env.get(keyless_public_env_var("keenable")))
     )
@@ -840,13 +873,18 @@ def _donsetch_status(env: Mapping[str, str], config: Mapping[str, Any]) -> Dict[
     return inspect(key=_clean_env_value(env.get("DONSETCH_BIN") or ""), config=dict(config))
 
 
-def _status_payload(env: Optional[Mapping[str, str]] = None, config: Optional[Mapping[str, Any]] = None) -> Dict[str, Any]:
+def _status_payload(
+    env: Optional[Mapping[str, str]] = None,
+    config: Optional[Mapping[str, Any]] = None,
+    raw_config: Optional[Mapping[str, Any]] = None,
+) -> Dict[str, Any]:
     active_env = env if env is not None else _credential_env()
     active_config = dict(config or _default_behavior_config())
     return {
         "providers": _provider_config_status(active_env, active_config),
         "profile": _profile_status(active_config, active_env),
-        "routing": active_config,
+        "routing": redact_secrets(active_config),
+        "ignored_file_keys": _ignored_file_credential_lines(raw_config if raw_config is not None else active_config),
         "donsetch": _donsetch_status(active_env, active_config),
         "jev": jev_setup.status_payload(active_env, active_config),
     }
@@ -1246,7 +1284,7 @@ def _handle_config_command(args: Any) -> None:
 
     if subcommand == "show":
         if getattr(args, "json", False):
-            print(json.dumps(config, indent=2, sort_keys=True))
+            print(json.dumps(redact_secrets(config), indent=2, sort_keys=True))
         else:
             print(_routing_summary(config))
         return
@@ -1355,12 +1393,14 @@ def _web_search_plus_cli_command(args: Any) -> None:
         # settings, which the engine lays over it at load time. Never written back.
         desktop = _desktop_settings(path)
         config = _apply_desktop_settings(json.loads(json.dumps(_load_behavior_config(path))), desktop)
-        payload = _status_payload(env, config)
+        payload = _status_payload(env, config, _raw_config_json(path))
         if getattr(args, "json", False):
-            print(json.dumps(payload, indent=2, sort_keys=True))
+            print(json.dumps(redact_secrets(payload), indent=2, sort_keys=True))
         else:
             print(_render_setup_guidance(env=env, fancy=not getattr(args, "plain", False), config=config))
             print("\n" + _routing_summary(config))
+            for notice in payload.get("ignored_file_keys") or []:
+                print("  ! " + notice)
             if desktop:
                 print("  from Hermes Desktop settings: " + ", ".join(sorted(desktop)))
             donsetch = payload.get("donsetch") or {}
@@ -1406,6 +1446,8 @@ def _web_search_plus_cli_command(args: Any) -> None:
                 key_commands.append(_hermes_set_command(item))
         print(f"\nRouting config file: {config_path}")
         print(_routing_summary(config))
+        for notice in _ignored_file_credential_lines(_raw_config_json(config_path)):
+            print("  ! " + notice)
         if getattr(args, "jev", False):
             want_jev = True
         elif getattr(args, "no_jev", False):
