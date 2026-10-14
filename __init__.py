@@ -2060,6 +2060,15 @@ def _clean_tool_provider(value: Any) -> tuple:
     return provider, f"Search error: unknown provider {value!r}. Valid providers: {valid}"
 
 
+def _clean_tool_extract_provider(value: Any) -> tuple:
+    """Return (provider, error) for web_extract_plus. Case and surrounding spaces do not matter."""
+    provider = str(value or "").strip().lower() or "auto"
+    if provider == "auto" or provider in EXTRACT_PROVIDER_IDS:
+        return provider, None
+    valid = ", ".join(["auto", *EXTRACT_PROVIDER_IDS])
+    return provider, f"Extract error: unknown provider {value!r}. Valid providers: {valid}"
+
+
 def _configured_max_results(fallback: int = 5) -> int:
     """Return defaults.max_results clamped to the tool range, or the fallback."""
     try:
@@ -2473,6 +2482,9 @@ def register(ctx: Any) -> None:
             urls = args_or_urls
         if isinstance(urls, str):
             urls = [urls]
+        provider, provider_error = _clean_tool_extract_provider(provider)
+        if provider_error:
+            return provider_error
         data = _run_extract(
             urls=urls,
             provider=provider,

@@ -9,6 +9,11 @@ from .contract_v3 import Capability, RequestV3
 from .orchestrator_v3 import ExecutedV3
 
 
+def normalize_provider_id(value: Any) -> str:
+    """Canonical provider id: case and surrounding spaces do not matter; empty means auto."""
+    return str(value or "").strip().lower() or "auto"
+
+
 def legacy_request_to_v3(
     capability: Capability | str,
     payload: Mapping[str, Any],
@@ -18,7 +23,7 @@ def legacy_request_to_v3(
 ) -> RequestV3:
     """Project a public legacy invocation into a complete RequestV3."""
     capability = Capability(capability)
-    provider = str(payload.get("provider") or "auto")
+    provider = normalize_provider_id(payload.get("provider"))
     default_fallback = capability is Capability.EXTRACT or provider == "auto"
     routing = {
         "mode": "auto" if provider == "auto" else "fixed",
