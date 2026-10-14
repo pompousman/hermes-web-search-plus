@@ -571,7 +571,7 @@ def _validate_runtime_config(config: Dict[str, Any]) -> Dict[str, Any]:
     if not isinstance(jev, dict):
         raise ValueError("jev must be an object")
     if "api_key" in jev and str(jev.get("api_key") or "").strip():
-        raise ValueError("jev.api_key is not allowed; store the key with `hermes config set TYPESAFE_API_KEY <key>`")
+        _warn_ignored_file_key("jev")
     for flag in ("enabled", "search_type", "extract_quality", "language_fill"):
         if not isinstance(jev.get(flag, False), bool):
             raise ValueError(f"jev.{flag} must be a boolean")
@@ -1006,7 +1006,7 @@ def ignored_file_credentials(config: Optional[Dict[str, Any]]) -> List[str]:
 
 def ignored_file_credential_notice(provider: str) -> str:
     spec = PROVIDER_SPECS.get(provider)
-    env_var = spec.env_var if spec else f"{provider.upper()}_API_KEY"
+    env_var = spec.env_var if spec else ("TYPESAFE_API_KEY" if provider == "jev" else f"{provider.upper()}_API_KEY")
     return (
         f"config.json contains an API key for {provider}; it is ignored — "
         f"store it with `hermes config set {env_var} …`"
