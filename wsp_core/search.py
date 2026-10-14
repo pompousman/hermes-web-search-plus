@@ -2174,8 +2174,12 @@ def _search_cache_vary(
     for it), so the cache key would equal that of a plain request while the
     provider call differs.
     """
+    from .cache import search_credential_context
+
     locale = (config.get("defaults") or {}).get("locale") or {}
-    return {"language": AUTO_LANGUAGE} if is_auto_language(locale.get("language")) else {}
+    vary: Dict[str, Any] = {"language": AUTO_LANGUAGE} if is_auto_language(locale.get("language")) else {}
+    vary["credential_scope"] = search_credential_context(plan.candidate_order, config)
+    return vary
 
 
 def _search_cache_write_eligible(
