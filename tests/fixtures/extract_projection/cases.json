@@ -129,27 +129,26 @@
       "calls": {"tavily": 1, "linkup": 0}
     },
     {
-      "name": "redirect_without_provenance_falls_back",
+      "name": "single_remaining_redirect_preserves_paid_content",
       "urls": ["https://example.com/a", "https://example.com/b"],
       "tavily": [
         {"url": "https://example.com/b", "content": "body b"},
-        {"url": "https://cdn.example.org/a-final", "content": "unattributed"}
+        {"url": "https://cdn.example.org/a-final", "content": "redirected a"}
       ],
       "linkup": [{"url": "https://example.com/a", "content": "linkup a"}],
       "legacy": [
-        ["https://example.com/a", "ok", "linkup a"],
+        ["https://cdn.example.org/a-final", "ok", "redirected a"],
         ["https://example.com/b", "ok", "body b"]
       ],
       "v3": [
-        ["https://example.com/a", "ok", "linkup a"],
+        ["https://cdn.example.org/a-final", "ok", "redirected a"],
         ["https://example.com/b", "ok", "body b"]
       ],
       "native": [
-        ["https://example.com/a", "ok", "linkup a"],
+        ["https://example.com/a", "ok", "redirected a"],
         ["https://example.com/b", "ok", "body b"]
       ],
-      "calls": {"tavily": 1, "linkup": 1},
-      "linkup_batch": ["https://example.com/a"]
+      "calls": {"tavily": 1, "linkup": 0}
     },
     {
       "name": "idn_requested_punycode_reported",

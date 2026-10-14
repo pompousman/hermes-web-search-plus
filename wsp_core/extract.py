@@ -590,6 +590,14 @@ def _execute_extract_v3(
             )
             if result.get("error"):
                 raise ProviderRequestError(str(result["error"]), transient=False)
+            matched, unmatched = match_extract_items(batch, result.get("results") or [])
+            if not any(_extract_item_usable(item) for item in matched):
+                unmatched_results.extend(
+                    {"provider": current_provider, "url": str(item.get("url") or ""),
+                     "has_content": _extract_item_usable(item)}
+                    for item in unmatched
+                )
+                raise ProviderContractFailure("all_urls_unmatched_or_failed")
             return result
 
         attempted = engine.execute(context, operation)
@@ -652,6 +660,8 @@ def _execute_extract_v3(
         refused_urls = [url for url, _validated, error in checked if error is not None]
         if refused_urls:
             payload["refused_urls"] = refused_urls
+        if unmatched_results:
+            payload["unmatched_results"] = unmatched_results
         add_provider_setup_guidance(payload, "extract", list(plan.candidate_order), config,
                                     requested_provider=str(request.routing.get("provider") or "auto"))
     else:

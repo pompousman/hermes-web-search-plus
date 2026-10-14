@@ -213,7 +213,8 @@ def test_unattributable_item_leaves_url_open_and_is_noted_not_cached():
         ],
         "linkup": [],
     }
-    urls = ["https://example.com/a", "https://example.com/b"]
+    # Two open URLs cannot be assigned a lone redirect by elimination.
+    urls = ["https://example.com/a", "https://example.com/b", "https://example.com/c"]
     with _Engine(case) as engine:
         first = extract.extract_plus(urls, provider="tavily")
         second = extract.extract_plus(urls, provider="tavily")
@@ -221,6 +222,7 @@ def test_unattributable_item_leaves_url_open_and_is_noted_not_cached():
     assert _legacy_rows(first) == [
         ["https://example.com/a", "error", None],
         ["https://example.com/b", "ok", "body b"],
+        ["https://example.com/c", "error", None],
     ]
     assert first["results"][0]["error"] == "No content could be extracted from this URL"
     assert "unattributed" not in json.dumps(first["results"])

@@ -12,6 +12,8 @@ No network access and no imports beyond ``urls``, so host adapters can use it.
 from __future__ import annotations
 
 from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
+import re
+from urllib.parse import quote, urlsplit, urlunsplit
 
 from .urls import canonical_url
 
@@ -35,6 +37,19 @@ def item_source_urls(item: Mapping[str, Any]) -> List[str]:
     return found
 
 
+def _rewrite_key(url: str) -> str:
+    """Ignore HTTP upgrades and percent spelling, not encoded path separators."""
+    try:
+        parts = urlsplit(url)
+        if parts.scheme.lower() not in {"http", "https"} or not parts.netloc:
+            return ""
+        path = quote(parts.path, safe="/%:@!$&'()*+,;=-._~")
+        path = re.sub(r"%[0-9a-fA-F]{2}", lambda match: match[0].upper(), path)
+        return canonical_url(urlunsplit(("https", parts.netloc, path, parts.query, parts.fragment)))
+    except ValueError:
+        return ""
+
+
 def match_extract_items(
     urls: Sequence[str], items: Sequence[Any]
 ) -> Tuple[List[Optional[Dict[str, Any]]], List[Dict[str, Any]]]:
@@ -44,8 +59,9 @@ def match_extract_items(
     ``unmatched`` lists provider items that answered no requested URL.
 
     Order of evidence: exact URL, canonical URL, then the source URL the
-    provider reports. An item that matches none of these is never given to a
-    URL by position. When several *different* requested spellings share one
+    provider reports, then HTTP/percent spelling equivalence. A final lone
+    item may answer a lone open URL (cross-host redirect), never an ambiguous
+    batch by position. When several *different* requested spellings share one
     canonical form (``?ref=1`` / ``?ref=2``), a canonical or source-URL hit is
     ambiguous and only an exact hit may decide.
     """
@@ -59,14 +75,15 @@ def match_extract_items(
     def run_pass(key: Callable[[str], str], source: bool, *, ambiguity_check: bool) -> None:
         groups: Dict[str, List[int]] = {}
         for position, url in enumerate(urls):
-            if matched[position] is None:
-                wanted = key(url)
-                if wanted:
-                    groups.setdefault(wanted, []).append(position)
+            wanted = key(url)
+            if wanted:
+                groups.setdefault(wanted, []).append(position)
         for wanted, positions in groups.items():
             if ambiguity_check and len({urls[p] for p in positions}) > 1:
                 continue
             for position in positions:
+                if matched[position] is not None:
+                    continue
                 for index, item in enumerate(candidates):
                     if index in used:
                         continue
@@ -79,6 +96,19 @@ def match_extract_items(
     run_pass(canonical_url, False, ambiguity_check=True)
     run_pass(str, True, ambiguity_check=False)
     run_pass(canonical_url, True, ambiguity_check=True)
+    run_pass(_rewrite_key, False, ambiguity_check=True)
+    run_pass(_rewrite_key, True, ambiguity_check=True)
+
+    open_positions = [position for position, item in enumerate(matched) if item is None]
+    remaining = [index for index in range(len(candidates)) if index not in used]
+    if len(open_positions) == len(remaining) == 1:
+        position, index = open_positions[0], remaining[0]
+        key = _rewrite_key(urls[position])
+        # A singleton left after an exact ?ref hit is still ambiguous: the
+        # remaining item could be another answer to that already-filled URL.
+        if key and len({url for url in urls if _rewrite_key(url) == key}) == 1:
+            matched[position] = candidates[index]
+            used.add(index)
 
     # The very same URL requested twice has one answer. A provider that
     # answers it once (or dedups server-side) serves both requests.

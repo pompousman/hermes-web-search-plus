@@ -1119,6 +1119,8 @@ def extract_firecrawl(
             images=images,
             metadata=metadata,
         ))
+    for url, item in zip(urls, results):
+        item["requested_url"] = url
     return _per_url_extract_payload("firecrawl", results, first_error)
 
 def extract_linkup(
@@ -1160,7 +1162,9 @@ def extract_linkup(
         )
 
     if len(urls) <= 1:
-        return {"provider": "linkup", "results": [fetch_one(url) for url in urls]}
+        return {"provider": "linkup", "results": [
+            {**fetch_one(url), "requested_url": url} for url in urls
+        ]}
 
     first_error: Optional[ProviderRequestError] = None
 
@@ -1192,6 +1196,8 @@ def extract_linkup(
             # One failing URL must not discard the pages already paid for.
             results.append(_per_url_extract_error("linkup", url, "Linkup fetch", exc))
             first_error = first_error or exc
+    for url, item in zip(urls, results):
+        item["requested_url"] = url
     return _per_url_extract_payload("linkup", results, first_error)
 
 def extract_tavily(
@@ -1933,6 +1939,8 @@ def extract_keenable(
             ))
         except Exception as e:
             results.append(_normalize_extract_result("keenable", url, error=str(e)))
+    for url, item in zip(urls, results):
+        item["requested_url"] = url
     return {"provider": "keenable", "results": results}
 
 
@@ -1986,4 +1994,6 @@ def extract_serper(
             ))
         except Exception as e:
             results.append(_normalize_extract_result("serper", url, error=str(e)))
+    for url, item in zip(urls, results):
+        item["requested_url"] = url
     return {"provider": "serper", "results": results}
