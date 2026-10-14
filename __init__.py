@@ -2266,7 +2266,15 @@ def _install_hermes_secret_resolver() -> None:
     global _HERMES_RESOLVER_FALLBACK_LOGGED
     try:
         from agent.secret_scope import get_secret as hermes_get_secret
-    except ImportError:
+    except Exception as exc:
+        if not isinstance(exc, ModuleNotFoundError) or exc.name not in {"agent", "agent.secret_scope"}:
+            def unavailable(_name: str, _default: Optional[str] = None) -> Optional[str]:
+                raise RuntimeError("Hermes credential scope unavailable; credential reads disabled")
+
+            set_secret_resolver(unavailable)
+            # Import errors may contain sensitive paths or configuration values.
+            logger.warning("web-search-plus: Hermes credential scope unavailable; credential reads disabled")
+            return
         set_secret_resolver(None)
         if not _HERMES_RESOLVER_FALLBACK_LOGGED:
             _HERMES_RESOLVER_FALLBACK_LOGGED = True
