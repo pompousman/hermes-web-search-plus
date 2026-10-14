@@ -511,6 +511,39 @@ class SQLiteStateStore:
             self._available = False
             return False
 
+    def release_half_open(
+        self, key: CircuitKey, error_class: ErrorClass, *, now: int
+    ) -> bool:
+        """Give back a probe lease that was claimed but never used."""
+        if not self._available:
+            return False
+        try:
+            connection = self._connect()
+            try:
+                connection.execute("BEGIN IMMEDIATE")
+                cursor = connection.execute(
+                    """
+                    UPDATE circuit_state SET open_until=?, updated_at=?
+                    WHERE provider=? AND capability=? AND endpoint=?
+                      AND credential_fingerprint=? AND error_class=?
+                      AND state=?
+                    """,
+                    (
+                        now,
+                        now,
+                        *key.values(),
+                        error_class.value,
+                        CircuitState.HALF_OPEN.value,
+                    ),
+                )
+                connection.commit()
+                return cursor.rowcount == 1
+            finally:
+                connection.close()
+        except sqlite3.Error:
+            self._available = False
+            return False
+
     def admit(self, key: CircuitKey, *, now: int) -> AdmissionDecision:
         if not self._available:
             return AdmissionDecision(

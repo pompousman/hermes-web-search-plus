@@ -376,3 +376,27 @@ def test_state_store_stays_unavailable_while_file_is_corrupt(tmp_path, monkeypat
     # Replacing the damaged file lets the next probe recover.
     path.unlink()
     assert store.available
+
+
+def test_budget_block_does_not_waste_the_half_open_lease(tmp_path):
+    store = SQLiteStateStore(tmp_path / "state.sqlite3")
+    engine = AttemptEngine(store, max_attempts=1)
+    context = _context(budget_limit_units=0)
+    store.record_failure(
+        context.circuit_key, ErrorClass.RATE_LIMIT, now=100, retry_after_seconds=1
+    )
+    calls = []
+
+    blocked = engine.execute(
+        context, lambda: calls.append("blocked") or {"results": []}, now=lambda: 102
+    )
+    assert blocked.receipt.skip_reason is SkipReason.BUDGET_BLOCKED
+    assert calls == []
+
+    # A caller with budget probes immediately instead of waiting 60 s.
+    probe = engine.execute(
+        _context(), lambda: calls.append("probe") or {"results": []}, now=lambda: 103
+    )
+    assert calls == ["probe"]
+    assert probe.receipt.outcome is AttemptOutcome.SUCCESS
+    assert probe.receipt.circuit_state_before is CircuitState.HALF_OPEN

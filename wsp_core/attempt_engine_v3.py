@@ -164,6 +164,16 @@ class AttemptEngine:
             ),
         )
 
+    def _release_lease(self, context: AttemptContext, decision, now: int) -> None:
+        """Return an unused half-open probe lease so the next caller can probe."""
+        if (
+            decision.circuit_state is CircuitState.HALF_OPEN
+            and decision.blocking_error_class is not None
+        ):
+            self.store.release_half_open(
+                context.circuit_key, decision.blocking_error_class, now=now
+            )
+
     def skip(
         self,
         context: AttemptContext,
@@ -300,6 +310,7 @@ class AttemptEngine:
                 units=context.budget_units,
             )
             if not budget_allowed:
+                self._release_lease(context, decision, int(now()))
                 return self._skipped(
                     context,
                     started=started,
@@ -327,6 +338,7 @@ class AttemptEngine:
                         context.budget_window,
                         units=context.budget_units,
                     )
+                    self._release_lease(context, decision, int(now()))
                     return self._skipped(
                         context,
                         started=started,
