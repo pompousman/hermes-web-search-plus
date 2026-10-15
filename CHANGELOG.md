@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [v5.1.1] — 2026-10-15
+
 ### Security
 
 - Under Hermes, `api_key`/`apiKey` in `config.json` is ignored; provider keys come only from the active Hermes profile (`hermes config set <PROVIDER>_API_KEY …`). A warning is logged once, and `hermes web-search-plus status` and `setup` name the affected provider without showing the value. DonSeTch no longer runs a `config.json` `api_key` as its binary path under Hermes (`donsetch.binary` and `DONSETCH_BIN` still work), and its child process gets `DONSETCH_*` values from the active profile. MCP, OpenClaw and the standalone CLI are unchanged.
