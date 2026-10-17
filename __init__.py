@@ -1936,8 +1936,29 @@ def _source_summary_excerpt(content: str, query: Optional[str] = None, limit: in
 _SNIPPET_DISPLAY_CHARS = 1200
 
 
+def _indent_continuation(text: str) -> str:
+    """Keep untrusted multi-line text inside its numbered item.
+
+    Every line after the first gets the item's three-space indent and empty
+    lines are dropped, so page text like "2. Install the build" cannot pass for
+    the next result. Text without a line break comes back unchanged.
+    """
+    parts = text.splitlines()
+    if len(parts) == 1 and parts[0] == text:
+        return text
+    return "\n   ".join(line for line in parts if line.strip())
+
+
+def _one_line(text: str) -> str:
+    """Titles and URLs are single-line fields; a line break would end the item."""
+    parts = text.splitlines()
+    if len(parts) == 1 and parts[0] == text:
+        return text
+    return " ".join(text.split())
+
+
 def _display_snippet(snippet: str) -> str:
-    """A long snippet on one line, cut for display; short ones unchanged.
+    """A long snippet cut for display and shown without bare continuation lines.
 
     The cut falls on a word boundary if that keeps at least half of the limit;
     text with few spaces (CJK, long URLs, minified code) is cut at the limit
@@ -1945,7 +1966,7 @@ def _display_snippet(snippet: str) -> str:
     whole. In the marker N counts the characters shown, M the snippet's length.
     """
     if len(snippet) <= _SNIPPET_DISPLAY_CHARS:
-        return snippet
+        return _indent_continuation(snippet)
     flat = " ".join(snippet.split())
     if len(flat) <= _SNIPPET_DISPLAY_CHARS:
         return flat
@@ -2083,18 +2104,19 @@ def _format_results(data: dict, *, now: Optional[datetime] = None) -> str:
                     f"   {' … '.join(passages)} [showing {len(passages)} query-ranked {noun} of {_source_total_chars(src, len(content))} characters]"
                 )
             elif content:
-                lines.append(f"   {_source_summary_excerpt(content, query, total_chars=_source_total_chars(src, len(content)))}")
+                excerpt = _source_summary_excerpt(content, query, total_chars=_source_total_chars(src, len(content)))
+                lines.append(f"   {_indent_continuation(excerpt)}")
         lines.append("")
 
     now = now or datetime.now(timezone.utc)
     for i, r in enumerate(results, 1):
-        title = r.get("title", "No title")
+        title = _one_line(str(r.get("title", "No title")))
         url = r.get("url", "")
         snippet = r.get("snippet", "")
         published = published_date(r, now=now)
         lines.append(f"{i}. {title}" + (f" [published {published}]" if published else ""))
         if url:
-            lines.append(f"   {url}")
+            lines.append(f"   {_one_line(str(url))}")
         if snippet:
             lines.append(f"   {_display_snippet(str(snippet))}")
         lines.append("")

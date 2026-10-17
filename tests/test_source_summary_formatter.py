@@ -25,7 +25,7 @@ def test_research_source_summary_marks_truncation_and_original_length():
     )
 
     marker = f"[TRUNCATED: showing first 500 of {len(content)} characters]"
-    assert content[:500] in output
+    assert content[:500].replace("\n", "\n   ") in output  # continuation lines stay indented
     assert marker in output
     assert "Apple product 079:" not in output
 

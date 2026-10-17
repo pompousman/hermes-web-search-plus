@@ -26,11 +26,12 @@ def test_long_snippet_is_cut_at_a_word_boundary_with_a_marker():
     assert len(line) < 1300
 
 
-def test_snippet_at_the_limit_prints_unchanged():
+def test_snippet_at_the_limit_keeps_its_lines_with_continuations_indented():
     snippet = "line one\nline two " + "x" * (1200 - 18)
     assert len(snippet) == 1200
 
-    assert f"   {snippet}" in _output(snippet)
+    assert "   line one\n   line two x" in _output(snippet)
+    assert snippet.replace("\n", "\n   ") in _output(snippet)
 
 
 def test_the_payload_snippet_is_not_modified():
