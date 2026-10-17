@@ -1020,6 +1020,42 @@ def _warn_ignored_file_key(provider: str) -> None:
     _logger.warning("web-search-plus: %s", ignored_file_credential_notice(provider))
 
 
+def ignored_file_settings(config: Optional[Dict[str, Any]]) -> List[Tuple[str, str]]:
+    """``(key, notice)`` for config.json keyless opt-ins and a SearXNG URL ignored under a host resolver.
+
+    Never includes the URL itself: it may carry credentials.
+    """
+    if file_credentials_allowed():
+        return []
+    found: List[Tuple[str, str]] = []
+    for provider, spec in PROVIDER_SPECS.items():
+        section = (config or {}).get(spec.config_section, {})
+        if spec.keyless and isinstance(section, dict) and is_truthy(section.get("allow_public")):
+            found.append((
+                f"{spec.config_section}.allow_public",
+                f"config.json sets {spec.config_section}.allow_public; it is ignored — "
+                f"enable it with `hermes config set {keyless_public_env_var(provider)} 1`",
+            ))
+    searxng = (config or {}).get("searxng", {})
+    if isinstance(searxng, dict) and (searxng.get("base_url") or searxng.get("instance_url")):
+        found.append((
+            "searxng.base_url",
+            "config.json sets a SearXNG URL (searxng.base_url); it is ignored — "
+            "set it with `hermes config set SEARXNG_INSTANCE_URL <url>`",
+        ))
+    return found
+
+
+def _warn_ignored_file_settings(config: Optional[Dict[str, Any]]) -> List[str]:
+    notices = []
+    for key, notice in ignored_file_settings(config):
+        notices.append(notice)
+        if key not in _IGNORED_FILE_KEY_WARNED:
+            _IGNORED_FILE_KEY_WARNED.add(key)
+            _logger.warning("web-search-plus: %s", notice)
+    return notices
+
+
 def get_api_key(provider: str, config: Dict[str, Any] = None) -> Optional[str]:
     """Get API key for provider from the host's credential store or config.json.
 

@@ -60,6 +60,7 @@ from .wsp_core.config import (
     _desktop_settings,
     _replace_pre_5_default_priority,
     _warn_ignored_file_key,
+    _warn_ignored_file_settings,
     apply_profile_effects,
     ignored_file_credential_notice,
     ignored_file_credentials,
@@ -157,6 +158,11 @@ def _ignored_file_credential_lines(config: Optional[Mapping[str, Any]]) -> List[
     for provider in providers:
         _warn_ignored_file_key(provider)
     return [ignored_file_credential_notice(provider) for provider in providers]
+
+
+def _ignored_file_setting_lines(config: Optional[Mapping[str, Any]]) -> List[str]:
+    """Status lines for config.json allow_public flags and SearXNG URL ignored under Hermes (never the URL); warns once."""
+    return _warn_ignored_file_settings(dict(config or {}))
 
 
 def _provider_config_status(env: Optional[Mapping[str, str]] = None, config: Optional[Mapping[str, Any]] = None) -> Dict[str, Any]:
@@ -985,6 +991,7 @@ def _status_payload(
         "profile": _profile_status(active_config, active_env),
         "routing": redact_secrets(active_config),
         "ignored_file_keys": _ignored_file_credential_lines(raw_config if raw_config is not None else active_config),
+        "ignored_file_settings": _ignored_file_setting_lines(raw_config if raw_config is not None else active_config),
         "donsetch": _donsetch_status(active_env, active_config),
         "jev": jev_setup.status_payload(active_env, active_config),
         "hermes_native": _hermes_keyless_rescue_state(hermes_config_path),
@@ -1500,7 +1507,7 @@ def _web_search_plus_cli_command(args: Any) -> None:
         else:
             print(_render_setup_guidance(env=env, fancy=not getattr(args, "plain", False), config=config))
             print("\n" + _routing_summary(config))
-            for notice in payload.get("ignored_file_keys") or []:
+            for notice in [*(payload.get("ignored_file_keys") or []), *(payload.get("ignored_file_settings") or [])]:
                 print("  ! " + notice)
             print("\n" + "\n".join(_render_keyless_rescue(payload["hermes_native"])))
             if desktop:
@@ -1548,7 +1555,8 @@ def _web_search_plus_cli_command(args: Any) -> None:
                 key_commands.append(_hermes_set_command(item))
         print(f"\nRouting config file: {config_path}")
         print(_routing_summary(config))
-        for notice in _ignored_file_credential_lines(_raw_config_json(config_path)):
+        raw_for_notices = _raw_config_json(config_path)
+        for notice in [*_ignored_file_credential_lines(raw_for_notices), *_ignored_file_setting_lines(raw_for_notices)]:
             print("  ! " + notice)
         if getattr(args, "jev", False):
             want_jev = True

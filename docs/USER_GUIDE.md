@@ -101,6 +101,8 @@ Search-capable providers include You.com, Serper, Exa, Firecrawl, Tavily, Linkup
 
 Keenable is keyless: set `KEENABLE_API_KEY` for the authenticated endpoints, or opt into its public tier (off by default). Without any search key, setup asks whether to start on it (default no); or run `hermes web-search-plus setup keenable --keyless-public`; it writes `keenable.allow_public: true` to `config.json` (equivalently `KEENABLE_ALLOW_PUBLIC=1`).
 
+Under Hermes, `config.json` is shared between profiles, so `<provider>.allow_public` (e.g. `keenable.allow_public`) is ignored there. Set it in the profile instead with `hermes config set KEENABLE_ALLOW_PUBLIC 1`, then run `/reload`. `hermes web-search-plus status` lists any such ignored flag with the fix. The setup flag above is not affected when WSP runs outside Hermes (MCP, standalone CLI).
+
 DonSeTch is a different kind of keyless provider: it is a separately installed local MCP service rather than a public WSP endpoint. Set `hermes config set DONSETCH_BIN /absolute/path/to/donsetch` (or the DonSeTch binary field in Hermes Desktop), then call `provider="donsetch"` explicitly. DonSeTch stays outside automatic routing and fallback unless `hermes web-search-plus config set-auto-allow donsetch on` is set. See [DonSeTch local MCP provider](DONSETCH.md) before enabling it; keyless removes commercial credentials and request billing, not local resource use, outbound traffic, rate limits, or website policy obligations.
 
 With a `KEENABLE_API_KEY` set, requests always use the authenticated endpoints. Without a key and without the opt-in, Keenable is treated as unconfigured: it won't auto-route, fall back, or enable `web_extract_plus`. When the public tier is enabled, queries and fetched URLs are sent to an **unauthenticated** public service with per-IP limits and no SLA — roughly 1,000 requests/hour and 10 requests/second — so treat it as a best-effort last resort, not a dependable provider. The first request that uses the public endpoint logs a one-time warning so the egress is visible, and `web-search-plus doctor` reports keyless providers as `key=no` with a separate `keyless=on/off` badge so key status stays truthful.
@@ -124,7 +126,7 @@ hermes web-search-plus setup --preset self-hosted
 hermes web-search-plus status
 ```
 
-The preset records the profile and enables Keenable's existing keyless public tier. Set the optional SearXNG endpoint with `hermes config set SEARXNG_INSTANCE_URL <url>`. To configure it directly, use the canonical `searxng.base_url` name (legacy `searxng.instance_url` remains supported):
+The preset records the profile and enables Keenable's existing keyless public tier. Set the optional SearXNG endpoint with `hermes config set SEARXNG_INSTANCE_URL <url>` (then `/reload`). Under Hermes this is the only place it is read: a `searxng.base_url` or `searxng.instance_url` in `config.json` is ignored, because the URL can carry credentials and `config.json` is shared between profiles; `status` tells you when one is set. Outside Hermes (MCP, standalone CLI) you can configure it directly in `config.json`; use the canonical `searxng.base_url` name (legacy `searxng.instance_url` remains supported):
 
 ```json
 {
