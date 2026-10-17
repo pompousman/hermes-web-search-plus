@@ -1258,4 +1258,22 @@ def extract_plus(
     )
     legacy = v3_response_to_legacy_extract(execution)
     _resolve_full_text_paths(legacy, runtime_config)
+    _append_omitted_url_errors(legacy, prepare_extract_request(request, runtime_config))
     return legacy
+
+
+def _append_omitted_url_errors(legacy: Dict[str, Any], plan: Any) -> None:
+    """One result per requested URL: URLs past the fan-out cap get an error row.
+
+    The engine only processes the first ``max_urls`` URLs; the rest used to
+    vanish from the tool output with just an internal warning.
+    """
+    if not plan.omitted_urls:
+        return
+    results = legacy.get("results")
+    if not isinstance(results, list):
+        results = []
+        legacy["results"] = results
+    message = f"not tried: limit of {plan.max_urls} URLs per call reached"
+    for url in plan.omitted_urls:
+        results.append({"url": url, "title": "", "content": None, "error": message})

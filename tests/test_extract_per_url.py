@@ -549,3 +549,38 @@ def test_exa_failed_statuses_become_error_items():
     assert [item["url"] for item in result["results"]] == [GOOD, OTHER]
     assert not result["results"][0].get("error")
     assert result["results"][1]["error"] == "Exa could not fetch this URL"
+
+
+# URLs past the fan-out cap -----------------------------------------------------
+
+
+def test_urls_past_the_fan_out_cap_get_their_own_not_tried_row(dns):
+    # Live on hermi: 12 URLs requested, 10 extracted, the last two vanished from
+    # the tool output with only an internal warning.
+    urls = [f"https://example.com/page-{index}" for index in range(12)]
+
+    def fake_firecrawl(batch, *args, **kwargs):
+        return {"provider": "firecrawl", "results": [_item("firecrawl", url) for url in batch]}
+
+    with _env("firecrawl"), mock.patch.object(providers, "extract_firecrawl", side_effect=fake_firecrawl) as fc:
+        result = extract.extract_plus(urls, provider="firecrawl")
+
+    assert fc.call_args.args[0] == urls[:10]
+    assert [item["url"] for item in result["results"]] == urls
+    assert all(item["content"] == "page text" for item in result["results"][:10])
+    for item in result["results"][10:]:
+        assert item["error"] == "not tried: limit of 10 URLs per call reached"
+        assert not item.get("content")
+
+
+def test_requests_within_the_cap_get_no_extra_rows(dns):
+    urls = [f"https://example.com/page-{index}" for index in range(3)]
+
+    def fake_firecrawl(batch, *args, **kwargs):
+        return {"provider": "firecrawl", "results": [_item("firecrawl", url) for url in batch]}
+
+    with _env("firecrawl"), mock.patch.object(providers, "extract_firecrawl", side_effect=fake_firecrawl):
+        result = extract.extract_plus(urls, provider="firecrawl")
+
+    assert [item["url"] for item in result["results"]] == urls
+    assert not any(item.get("error") for item in result["results"])
