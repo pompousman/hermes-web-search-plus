@@ -200,3 +200,25 @@ def test_engine_result_dict_is_unchanged_by_the_header_facts(monkeypatch, handle
     assert hit["cached"] is True and "routing" not in hit
     assert not any(key.startswith("_v3_") or key in {"trace", "elapsed_ms", "fallback_from"} for key in hit)
     assert trace["cache_origin_routing"] == {"auto_routed": True, "confidence_level": "low", "reason": "intent_general"}
+
+
+def test_trace_counts_failed_and_empty_attempts_but_not_cancelled_hedges():
+    from types import SimpleNamespace
+
+    from wsp_core.search import _fill_search_trace
+
+    def attempt(provider, outcome, result_count=0):
+        return SimpleNamespace(provider=provider, outcome=outcome, result_count=result_count, decision="attempted")
+
+    execution = SimpleNamespace(
+        response=SimpleNamespace(provider_attempts=[
+            attempt("serper", "failed"),
+            attempt("tavily", "cancelled"),
+            attempt("brave", "success", 0),
+            attempt("exa", "success", 3),
+        ]),
+        legacy_payload={},
+    )
+    trace = {}
+    _fill_search_trace(trace, execution, {"provider": "exa"})
+    assert trace == {"fallback_from": ["serper", "brave"]}

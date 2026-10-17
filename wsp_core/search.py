@@ -2317,7 +2317,12 @@ def _fill_search_trace(trace: Dict[str, Any], execution: Any, legacy: Dict[str, 
     for attempt in execution.response.provider_attempts:
         if attempt.provider == serving:
             break
-        if attempt.decision == "attempted" and attempt.provider not in failed:
+        # Failed or empty answers count; a hedge cancelled because another
+        # provider won did not fail and is left out.
+        gave_up = attempt.outcome == "failed" or (
+            attempt.outcome in ("success", "partial") and not attempt.result_count
+        )
+        if attempt.decision == "attempted" and gave_up and attempt.provider not in failed:
             failed.append(attempt.provider)
     else:
         failed = []  # no serving provider among the attempts: nothing to compare
