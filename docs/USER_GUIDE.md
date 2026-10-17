@@ -437,6 +437,22 @@ Parameter semantics:
 - `quality_report`: include routing diagnostics, skipped providers, result quality hints, and extraction recommendation.
 - `mode="research"`: query multiple providers and optionally extract selected URLs within a best-effort wall-clock budget.
 
+Reading the text output: after a security notice line, the header line names the serving provider, then how it was routed, then machine-readable `key=value` bits. Clients that parse the text should ignore bits they do not know.
+
+```text
+[Provider: exa | auto-routed | low confidence | intent_general | results=1 | elapsed_ms=37 | fallback_from=serper,brave]
+[Provider: serper | cached 7s ago | auto-routed | low confidence | intent_general | results=1 | elapsed_ms=3]
+[Provider: research | auto-routed | low confidence | intent_general | providers=brave,exa,keenable | pages=3 | results=5 | elapsed_ms=12400]
+```
+
+- `results`: results in this output, also `0` for a search that found nothing.
+- `elapsed_ms`: wall time of this call; for a cache hit, the time of the lookup.
+- `fallback_from`: providers that failed or came back empty before the serving one, in order. Absent without a fallback.
+- `providers` and `pages` (research only): the providers whose results were merged and the number of pages read.
+- A cache hit repeats how the cached search was routed. Entries cached before 5.1.2 show no routing.
+
+Each result is `N. title` (with `[published YYYY-MM-DD]` when known), then the URL and the snippet indented by three spaces, then a blank line. Every snippet line is indented, so page text can never start a line of its own.
+
 ## Using `web_extract_plus`
 
 Use `web_extract_plus` when you already have URLs and want page content, not just search snippets.
