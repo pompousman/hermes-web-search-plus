@@ -1,5 +1,6 @@
 """A successful search with no hits says so; non-empty output is unchanged."""
 
+import re
 from unittest import mock
 
 from plugin_loader import load_plugin
@@ -20,6 +21,10 @@ class _Ctx:
         self.tools[kwargs["name"]] = kwargs
 
 
+def _elapsed_normalised(output):
+    return re.sub(r"elapsed_ms=\d+", "elapsed_ms=N", output)
+
+
 def _search_handler():
     ctx = _Ctx()
     plugin.register(ctx)
@@ -29,9 +34,9 @@ def _search_handler():
 def test_explicit_provider_with_no_hits_says_so():
     data = {"provider": "brave", "query": "q", "results": []}
     with mock.patch.object(plugin, "_run_search", return_value=data):
-        output = _search_handler()("q", provider="brave")
+        output = _elapsed_normalised(_search_handler()("q", provider="brave"))
 
-    assert output == "\n".join([plugin._UNTRUSTED_WEB_DATA_NOTICE, "[Provider: brave]", NOTICE])
+    assert output == "\n".join([plugin._UNTRUSTED_WEB_DATA_NOTICE, "[Provider: brave | results=0 | elapsed_ms=N]", NOTICE])
 
 
 def test_auto_routed_search_with_no_hits_says_so():
@@ -40,11 +45,11 @@ def test_auto_routed_search_with_no_hits_says_so():
         "routing": {"auto_routed": True, "confidence_level": "medium", "reason": "intent_general"},
     }
     with mock.patch.object(plugin, "_run_search", return_value=data):
-        output = _search_handler()("q")
+        output = _elapsed_normalised(_search_handler()("q"))
 
     assert output == "\n".join([
         plugin._UNTRUSTED_WEB_DATA_NOTICE,
-        "[Provider: brave | auto-routed | medium confidence | intent_general]",
+        "[Provider: brave | auto-routed | medium confidence | intent_general | results=0 | elapsed_ms=N]",
         NOTICE,
     ])
 
@@ -55,9 +60,9 @@ def test_research_mode_with_no_hits_says_so():
         "source_summaries": [], "routing": {}, "metadata": {},
     }
     with mock.patch.object(plugin, "_run_search", return_value=data):
-        output = _search_handler()("q", mode="research")
+        output = _elapsed_normalised(_search_handler()("q", mode="research"))
 
-    assert output == "\n".join([plugin._UNTRUSTED_WEB_DATA_NOTICE, "[Provider: research]", NOTICE])
+    assert output == "\n".join([plugin._UNTRUSTED_WEB_DATA_NOTICE, "[Provider: research | results=0 | elapsed_ms=N]", NOTICE])
 
 
 def test_search_error_keeps_its_own_text():
@@ -82,7 +87,7 @@ def test_non_empty_output_is_unchanged():
 
     assert output == "\n".join([
         plugin._UNTRUSTED_WEB_DATA_NOTICE,
-        "[Provider: brave]",
+        "[Provider: brave | results=1]",
         "1. T",
         "   https://a.test/1",
         "   s",

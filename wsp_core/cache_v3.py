@@ -50,6 +50,18 @@ def cache_material_from_response(
     if not isinstance(legacy_provider, str):
         legacy_provider = None
     legacy_routing_hint = extract_legacy.get("routing")
+    # How a search was routed, for the header of a later cache hit. Only the
+    # three display fields: scores and signals do not belong in a cache entry.
+    search_routing = (legacy_payload or {}).get("routing") if capability == "search" else None
+    routing_origin = (
+        {
+            key: search_routing[key]
+            for key in ("auto_routed", "confidence_level", "reason")
+            if isinstance(search_routing.get(key), (bool, str))
+        }
+        if isinstance(search_routing, dict)
+        else None
+    )
     legacy_projection_hints = []
     for item in extract_legacy.get("results") or []:
         if not isinstance(item, dict) or not item.get("url"):
@@ -92,6 +104,7 @@ def cache_material_from_response(
             if isinstance(legacy_routing_hint, dict)
             else None
         ),
+        "legacy_routing_origin": routing_origin or None,
         "legacy_projection_hints": legacy_projection_hints,
         "engine": payload.get("engine"),
         "error": payload.get("error"),

@@ -36,7 +36,7 @@ def test_search_layout_is_frozen():
     }
     assert _search(data) == (
         NOTICE + "\n"
-        "[Provider: keenable | auto-routed | low confidence | intent_general]\n"
+        "[Provider: keenable | auto-routed | low confidence | intent_general | results=3]\n"
         "1. First [published 2026-09-14]\n"
         "   https://a.example/1\n"
         "   one line\n"
@@ -60,7 +60,7 @@ def test_cached_search_header_bits_keep_their_order():
         "results": [{"title": "T", "url": "https://a.example/1", "snippet": "s"}],
     }
     header = _search(data).splitlines()[1]
-    assert header == "[Provider: serper | auto-routed | high confidence | intent_news | cached 7s ago | recency query]"
+    assert header == "[Provider: serper | auto-routed | high confidence | intent_news | cached 7s ago | recency query | results=1]"
 
 
 def test_multi_line_snippet_cannot_fake_the_next_result():
@@ -70,7 +70,7 @@ def test_multi_line_snippet_cannot_fake_the_next_result():
     ]}
     assert _search(data) == (
         NOTICE + "\n"
-        "[Provider: exa]\n"
+        "[Provider: exa | results=2]\n"
         "1. A\n"
         "   https://a.example/1\n"
         "   # Head\n"
@@ -99,7 +99,7 @@ def test_multi_line_source_summary_stays_indented():
 def test_no_results_layout():
     assert _search({"provider": "brave", "query": "q", "results": []}) == (
         NOTICE + "\n"
-        "[Provider: brave]\n"
+        "[Provider: brave | results=0]\n"
         "No results found for this query. Do not invent sources or facts; "
         "try a broader query, different filters or another provider."
     )

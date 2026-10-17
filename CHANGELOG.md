@@ -12,6 +12,11 @@
 
 - `status` and `status --json` (new field `ignored_file_settings`) now say when `config.json` sets `<provider>.allow_public` (e.g. `keenable.allow_public`) or a SearXNG URL under Hermes, where both are ignored, and name the profile setting to use instead (`KEENABLE_ALLOW_PUBLIC`, `SEARXNG_INSTANCE_URL`). The URL itself is never printed. The user guide explains this too.
 
+### Added
+
+- The search header now ends with machine-readable `key=value` bits for apps that parse the text: `results=N` (results shown, also `results=0` on an empty call), `elapsed_ms=N` (time of this call; a cache hit reports its own time) and `fallback_from=a,b` (providers tried before the serving one, only when a fallback happened). Research mode adds `providers=a,b,c` and `pages=N`. Existing bits keep their wording and order; values are single tokens. The JSON, RPC and native outputs are unchanged.
+- A cache hit keeps how the entry was routed: `[Provider: keenable | cached 7s ago | auto-routed | low confidence | intent_general | results=5 | elapsed_ms=3]`. Entries cached before this version show no routing bits.
+
 ## [v5.1.1] — 2026-10-15
 
 ### Security

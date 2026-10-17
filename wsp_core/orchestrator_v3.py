@@ -482,6 +482,11 @@ def execute_v3_request(
                 legacy_payload = copy.deepcopy(lookup.legacy_payload or {})
                 legacy_payload["cached"] = True
                 legacy_payload["cache_age_seconds"] = lookup.age_seconds or 0
+                if isinstance(lookup.payload.get("legacy_routing_origin"), dict):
+                    # Private key: dropped from the legacy result, read by run_search_request.
+                    legacy_payload["_v3_cache_origin_routing"] = dict(
+                        lookup.payload["legacy_routing_origin"]
+                    )
                 stage_set = {
                     "normalize",
                     "validate",

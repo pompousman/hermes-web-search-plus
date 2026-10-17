@@ -2239,8 +2239,13 @@ def run_search_request(
     cache_ttl: Optional[int] = None,
     max_wall_time_ms: Optional[int] = None,
     config: Optional[Dict[str, Any]] = None,
+    trace: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Run a search in-process and return the result dict the CLI would emit.
+
+    ``trace``, if given, receives facts for the text header that the result
+    dict does not carry: ``fallback_from`` (providers tried before the serving
+    one) and ``cache_origin_routing`` (how a cached entry was routed).
 
     Mirrors the argv the Hermes plugin used to pass to the subprocess, then routes
     it through the same parser and pipeline so behaviour is identical without the
@@ -2300,7 +2305,27 @@ def run_search_request(
         },
     )
     execution = execute_v3_request(request, _search_adapter(), config)
-    return v3_response_to_legacy_search(execution)
+    legacy = v3_response_to_legacy_search(execution)
+    if trace is not None:
+        _fill_search_trace(trace, execution, legacy)
+    return legacy
+
+
+def _fill_search_trace(trace: Dict[str, Any], execution: Any, legacy: Dict[str, Any]) -> None:
+    serving = legacy.get("provider")
+    failed: List[str] = []
+    for attempt in execution.response.provider_attempts:
+        if attempt.provider == serving:
+            break
+        if attempt.decision == "attempted" and attempt.provider not in failed:
+            failed.append(attempt.provider)
+    else:
+        failed = []  # no serving provider among the attempts: nothing to compare
+    if failed:
+        trace["fallback_from"] = failed
+    origin = execution.legacy_payload.get("_v3_cache_origin_routing")
+    if isinstance(origin, dict):
+        trace["cache_origin_routing"] = dict(origin)
 
 
 def run_extract_request_v3(

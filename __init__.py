@@ -1834,14 +1834,19 @@ def _run_search(
     *,
     no_cache: bool = False,
     cache_ttl: Optional[int] = None,
+    trace: Optional[dict] = None,
 ) -> dict:
-    """Run a search in-process, bounded by a wall-clock timeout."""
+    """Run a search in-process, bounded by a wall-clock timeout.
+
+    ``trace``, if given, is filled with header facts the result dict lacks.
+    """
     timeout = _search_timeout(mode, research_time_budget, timeout)
     search = _load_search_module()
     if search is None:
         return {"error": _ENGINE_UNAVAILABLE, "provider": provider, "query": query, "results": []}
 
     def call() -> dict:
+        extra = {"trace": trace} if trace is not None else {}
         return search.run_search_request(
             query=query, provider=provider, count=count, exa_depth=exa_depth,
             time_range=time_range, freshness=freshness, search_type=search_type,
@@ -1850,6 +1855,7 @@ def _run_search(
             research_time_budget=research_time_budget, language=language, country=country,
             no_cache=no_cache, cache_ttl=cache_ttl,
             max_wall_time_ms=_engine_deadline_ms(timeout),
+            **extra,
         )
 
     try:
@@ -1985,6 +1991,41 @@ _UNTRUSTED_WEB_DATA_NOTICE = (
 )
 
 
+_HEADER_TOKEN_UNSAFE = re.compile(r"[^A-Za-z0-9_.\-]")
+
+
+def _header_token(value: Any) -> str:
+    """A provider id as one header token: no spaces, ``|``, ``]`` or ``=``."""
+    return _HEADER_TOKEN_UNSAFE.sub("", str(value))[:40]
+
+
+def _header_list(values: Any) -> str:
+    """Comma-joined, deduplicated, in order; empty when nothing usable is left."""
+    if not isinstance(values, (list, tuple)):
+        return ""
+    tokens: List[str] = []
+    for value in values:
+        token = _header_token(value)
+        if token and token not in tokens:
+            tokens.append(token)
+    return ",".join(tokens)
+
+
+def _header_count(value: Any) -> Optional[int]:
+    return value if isinstance(value, int) and not isinstance(value, bool) and value >= 0 else None
+
+
+def _routing_header_bits(routing: Any) -> List[str]:
+    bits: List[str] = []
+    if isinstance(routing, dict) and routing.get("auto_routed"):
+        bits.append("auto-routed")
+        if routing.get("confidence_level"):
+            bits.append(f"{routing['confidence_level']} confidence")
+        if routing.get("reason"):
+            bits.append(str(routing["reason"]))
+    return bits
+
+
 def _format_results(data: dict, *, now: Optional[datetime] = None) -> str:
     """Format search results for LLM consumption.
 
@@ -2010,12 +2051,7 @@ def _format_results(data: dict, *, now: Optional[datetime] = None) -> str:
     lines = [_UNTRUSTED_WEB_DATA_NOTICE]
 
     header_bits = [f"Provider: {provider}"]
-    if routing.get("auto_routed"):
-        header_bits.append("auto-routed")
-        if routing.get("confidence_level"):
-            header_bits.append(f"{routing['confidence_level']} confidence")
-        if routing.get("reason"):
-            header_bits.append(str(routing["reason"]))
+    header_bits.extend(_routing_header_bits(routing))
     if cached:
         if isinstance(cache_age, int):
             header_bits.append(f"cached {cache_age}s ago")
@@ -2028,6 +2064,26 @@ def _format_results(data: dict, *, now: Optional[datetime] = None) -> str:
                 header_bits.append("recency query")
         except Exception:
             pass
+        if not routing.get("auto_routed"):
+            # A cache hit carries no routing of its own; show how the entry was routed.
+            header_bits.extend(_routing_header_bits(data.get("cache_origin_routing")))
+    # Machine-readable key=value bits, appended after the human ones.
+    metadata = data.get("metadata") or {}
+    if provider == "research":
+        merged = _header_list(metadata.get("providers_merged"))
+        if merged:
+            header_bits.append(f"providers={merged}")
+        pages = _header_count(metadata.get("extracted_url_count"))
+        if pages is not None:
+            header_bits.append(f"pages={pages}")
+    if isinstance(results, list):
+        header_bits.append(f"results={len(results)}")
+    elapsed_ms = _header_count(data.get("elapsed_ms"))
+    if elapsed_ms is not None:
+        header_bits.append(f"elapsed_ms={elapsed_ms}")
+    fallback_from = _header_list(data.get("fallback_from"))
+    if fallback_from:
+        header_bits.append(f"fallback_from={fallback_from}")
     lines.append("[" + " | ".join(header_bits) + "]")
     if not results:
         # A successful call with no hits must not read like a success with content.
@@ -2518,6 +2574,8 @@ def register(ctx: Any) -> None:
         provider, provider_error = _clean_tool_provider(provider)
         if provider_error:
             return provider_error
+        trace: dict = {}
+        started = time.monotonic()
         data = _run_search(
             query=query,
             provider=provider,
@@ -2535,7 +2593,11 @@ def register(ctx: Any) -> None:
             country=country,
             no_cache=no_cache,
             cache_ttl=cache_ttl,
+            trace=trace,
         )
+        if isinstance(data, dict):
+            # Text-only facts for the header; the engine result stays as it is.
+            data = {**data, **trace, "elapsed_ms": int((time.monotonic() - started) * 1000)}
         return _format_results(data)
 
     def check_fn() -> bool:

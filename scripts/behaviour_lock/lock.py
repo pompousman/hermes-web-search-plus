@@ -59,6 +59,7 @@ def _lock_rows(path: Path, mode: str) -> List[str]:
         else:
             # A repeated query is served from cache; only its age is volatile.
             output = re.sub(r"cached \d+s ago", "cached Ns ago", row["output"])
+            output = re.sub(r"elapsed_ms=\d+", "elapsed_ms=N", output)
             kept = {"id": row["id"], "output": output, "payload": row["payload"], "raised": row["raised"],
                     # Research members run concurrently: compare the calls as a set.
                     "http": sorted([h["provider"], h["method"], h["path"], h["status"]] for h in row["http"])}
