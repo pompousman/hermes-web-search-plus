@@ -21,10 +21,11 @@ Run Hermes from your phone? See [HUI+](https://hermesui.xyz).
 
 > Ported from [web-search-plus-plugin](https://github.com/robbyczgw-cla/web-search-plus-plugin) for the [Hermes Agent](https://github.com/NousResearch/hermes-agent) plugin API.
 
-Current release: **v5.1.1**. Version history: [Changelog](CHANGELOG.md).
+Current release: **v5.1.2**. Version history: [Changelog](CHANGELOG.md).
 
 ### What's new in 5.1
 
+- **5.1.2:** batch extraction keeps the pages it already fetched when a provider hits a rate limit mid-batch, every requested URL gets an answer, multi-line snippets can no longer pass for the next result, and the search header ends with machine-readable `results=`, `elapsed_ms=` and `fallback_from=` bits. See the [5.1.2 release notes](docs/RELEASE_NOTES_V512.md).
 - **5.1.1:** refused URLs stay out of Hermes' keyless rescue, provider keys stay in the active profile, and extraction returns one result per requested URL. See the [5.1.1 release notes](docs/RELEASE_NOTES_V511.md).
 - **Keys come through Hermes.** Web Search Plus reads provider keys from your active Hermes profile and no longer reads `.env` files itself. Store keys with `hermes config set BRAVE_API_KEY <key>` or in Hermes Desktop (Settings > Plugins > Web Search Plus). Keys kept only in the plugin folder's `.env` or `~/.hermes/plugins/.env` must move: see [Breaking changes in 5.1](CHANGELOG.md#breaking-changes).
 - **Setup runs inside Hermes.** `hermes web-search-plus status` and `hermes web-search-plus setup` show which keys the active profile sees and print the `hermes config set` command for each missing one.

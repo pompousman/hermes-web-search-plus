@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [v5.1.2] — 2026-10-18
+
 ### Fixed
 
 - Search output: lines of a multi-line snippet or source summary are now indented like the URL line, and empty lines inside them are dropped, so page text such as `2. Install the build` no longer looks like the next result (or lets a page fake one). Line breaks inside a title or URL become spaces. Single-line snippets are unchanged. A golden test now freezes the search and extract text layout.
