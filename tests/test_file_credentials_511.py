@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import sys
 
 import pytest
 
@@ -194,7 +195,11 @@ def test_ignored_settings_reported_under_resolver_without_url(tmp_path, monkeypa
     assert "ignored_file_keys" in payload
 
 
-def test_ignored_settings_silent_without_resolver(tmp_path, capsys):
+def test_ignored_settings_silent_without_resolver(tmp_path, capsys, monkeypatch):
+    # Hermetic on machines with Hermes installed: status would install the
+    # real resolver when agent.secret_scope is importable.
+    monkeypatch.setitem(sys.modules, "agent.secret_scope", None)
+    monkeypatch.setattr(wsp, "_install_hermes_secret_resolver", lambda: None)
     assert credentials.get_secret_resolver() is None
     path = tmp_path / "config.json"
     path.write_text(json.dumps(_settings_config()))
