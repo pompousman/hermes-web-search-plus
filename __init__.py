@@ -196,8 +196,18 @@ def _display_path(path: Path) -> str:
     return "~" + text[len(home):] if home not in ("", "/") and (text == home or text.startswith(home + os.sep)) else text
 
 
-def _legacy_env_lines() -> List[str]:
-    """Status lines for a pre-5.1 ``.env`` that is no longer read (never its content)."""
+def _legacy_env_lines(keys_configured: bool = False) -> List[str]:
+    """Status lines for a pre-5.1 ``.env`` that is no longer read (never its content).
+
+    Once the profile has provider keys the file is only a leftover: say so
+    instead of asking the user to move keys they already moved.
+    """
+    if keys_configured:
+        return [
+            f"An old .env file in {_display_path(path.parent)} is no longer read since 5.1. "
+            "Your Hermes profile has provider keys now, so the file is not needed; you can delete it."
+            for path in _legacy_env_files()
+        ]
     return [
         f"A .env file in {_display_path(path.parent)} is no longer read since 5.1. "
         "Move each key into your Hermes profile: `hermes config set BRAVE_API_KEY <key>` "
@@ -211,7 +221,7 @@ def _legacy_env_tool_error(tool: str) -> str:
     where = ", ".join(_display_path(path) for path in _legacy_env_files())
     return (
         f"{tool} error: no provider key is available. Keys from the old .env file ({where}) "
-        "are not read since Web Search Plus 5.1, so nothing was searched. Tell the user to move each key "
+        f"are not read since Web Search Plus 5.1, so nothing was {'extracted' if tool == 'Extract' else 'searched'}. Tell the user to move each key "
         "into their Hermes profile with `hermes config set BRAVE_API_KEY <key>` "
         "(same name for every key in that file), then run /reload."
     )
@@ -221,13 +231,34 @@ def _native_backend_hint(search_configured: bool, extract_configured: bool, nati
     """How to route Hermes' own web_search/web_extract through the user's WSP keys, or None.
 
     Only from the web settings the status already reads; never changes them.
+    Extraction is recommended only with an extraction provider: Brave and other
+    search-only keys cannot read pages, and a ``wsp`` extract backend without
+    one fails every call, which Hermes' keyless rescue then hands to anonymous
+    services without the user noticing.
     """
     selected = set(native.get("native_capabilities") or [])
+    if "extract" in selected and not extract_configured:
+        return (
+            "web.extract_backend is wsp, but none of your Web Search Plus keys can extract pages "
+            "(Brave, for example, only searches). Every web_extract fails in WSP, and Hermes' keyless rescue "
+            "then sends the URL to anonymous services. Add an extraction key "
+            "(for example `hermes config set TAVILY_API_KEY <key>`) or hand extraction back to Hermes: "
+            "`hermes config set web.extract_backend \"\"`, then /reload."
+        )
     if search_configured and "search" not in selected:
+        extract_part = (
+            " (and `hermes config set web.extract_backend wsp` for extraction)"
+            if extract_configured and "extract" not in selected
+            else ""
+        )
+        extract_note = (
+            "" if extract_configured
+            else " Keep Hermes' own web_extract: none of your keys can extract pages."
+        )
         return (
             "Hermes' own web_search does not use your Web Search Plus keys. To route it through them: "
-            "`hermes config set web.search_backend wsp` (and `hermes config set web.extract_backend wsp` "
-            "for extraction), then /reload. Alternative: keep Hermes' search and list "
+            f"`hermes config set web.search_backend wsp`{extract_part}, then /reload.{extract_note} "
+            "Alternative: keep Hermes' search and list "
             "web_search_plus/web_extract_plus under tools.tool_search.never_defer."
         )
     if extract_configured and "extract" not in selected:
@@ -1588,7 +1619,9 @@ def _web_search_plus_cli_command(args: Any) -> None:
             print("\n" + _routing_summary(config))
             for notice in [*(payload.get("ignored_file_keys") or []), *(payload.get("ignored_file_settings") or [])]:
                 print("  ! " + notice)
-            for notice in _legacy_env_lines():
+            status_providers = payload.get("providers") or {}
+            keys_now = bool(status_providers.get("search_configured") or status_providers.get("extract_configured"))
+            for notice in _legacy_env_lines(keys_now):
                 print("  ! " + notice)
             if payload.get("native_backend_hint"):
                 print("\n" + payload["native_backend_hint"])
@@ -1641,9 +1674,10 @@ def _web_search_plus_cli_command(args: Any) -> None:
         raw_for_notices = _raw_config_json(config_path)
         for notice in [*_ignored_file_credential_lines(raw_for_notices), *_ignored_file_setting_lines(raw_for_notices)]:
             print("  ! " + notice)
-        for notice in _legacy_env_lines():
-            print("  ! " + notice)
         setup_providers = _provider_config_status(env_now, config)
+        setup_keys = bool(setup_providers.get("search_configured") or setup_providers.get("extract_configured"))
+        for notice in _legacy_env_lines(setup_keys):
+            print("  ! " + notice)
         setup_hint = _native_backend_hint(
             bool(setup_providers.get("search_configured")), bool(setup_providers.get("extract_configured")),
             _hermes_keyless_rescue_state(),

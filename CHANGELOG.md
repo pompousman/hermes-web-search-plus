@@ -9,7 +9,7 @@
 ### Changed
 
 - The `web_search_plus` tool description no longer tells the model to prefer Hermes' `web_search`; it describes web search through your configured providers and keeps the routing facts.
-- `status` and `setup` (and `status --json`, new field `native_backend_hint`) explain how to route Hermes' own `web_search`/`web_extract` through your Web Search Plus keys (`hermes config set web.search_backend wsp`, `web.extract_backend wsp`) when a provider is configured and the native backend is not selected. Nothing is written to your Hermes config.
+- `status` and `setup` (and `status --json`, new field `native_backend_hint`) explain how to route Hermes' own `web_search`/`web_extract` through your Web Search Plus keys (`hermes config set web.search_backend wsp`, and `web.extract_backend wsp` only when one of your keys can extract pages) when a provider is configured and the native backend is not selected. With `web.extract_backend wsp` but no extraction provider (e.g. Brave only), `status` warns that every extract fails and Hermes' keyless rescue sends the URL to anonymous services. After the keys are moved into the profile, the old-`.env` notice says the file can be deleted. Nothing is written to your Hermes config.
 
 ## [v5.1.2] — 2026-10-18
 

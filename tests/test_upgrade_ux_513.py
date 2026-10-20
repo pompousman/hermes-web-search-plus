@@ -171,15 +171,39 @@ def test_brave_user_is_told_how_to_route_hermes_search_through_wsp(hermes, capsy
     out = _status(capsys)
     assert "Hermes' own web_search does not use your Web Search Plus keys." in out
     assert "`hermes config set web.search_backend wsp`" in out
-    assert "`hermes config set web.extract_backend wsp`" in out
+    # Brave cannot extract: recommending a wsp extract backend would fail every call.
+    assert "web.extract_backend wsp" not in out
+    assert "Keep Hermes' own web_extract" in out
     assert "tools.tool_search.never_defer" in out
     assert KEY not in out
     data = json.loads(_status(capsys, "--json"))
     assert "web.search_backend wsp" in data["native_backend_hint"]
 
 
+def test_search_and_extract_keys_get_both_backend_commands(hermes, capsys):
+    hermes["BRAVE_API_KEY"] = KEY
+    hermes["TAVILY_API_KEY"] = KEY
+    out = _status(capsys)
+    assert "`hermes config set web.search_backend wsp`" in out
+    assert "`hermes config set web.extract_backend wsp`" in out
+    assert "Keep Hermes' own web_extract" not in out
+
+
+def test_wsp_extract_backend_without_an_extraction_key_is_flagged(hermes, capsys):
+    # Seen live: Brave only + extract_backend wsp -> every extract failed in WSP and
+    # Hermes' keyless rescue sent the URL to anonymous services, silently.
+    hermes["BRAVE_API_KEY"] = KEY
+    wsp._test_config_yaml.write_text("web:\n  search_backend: wsp\n  extract_backend: wsp\n")
+    out = _status(capsys)
+    assert "none of your Web Search Plus keys can extract pages" in out
+    assert "keyless rescue" in out
+    assert 'hermes config set web.extract_backend ""' in out
+    assert KEY not in out
+
+
 def test_brave_user_with_wsp_backend_gets_no_hint(hermes, capsys):
     hermes["BRAVE_API_KEY"] = KEY
+    hermes["TAVILY_API_KEY"] = KEY
     wsp._test_config_yaml.write_text("web:\n  search_backend: wsp\n  extract_backend: wsp\n")
     out = _status(capsys)
     assert "does not use your Web Search Plus keys" not in out
@@ -223,3 +247,19 @@ def test_descriptions_no_longer_steer_the_model_away_from_wsp(hermes):
         description = tools[name]["schema"]["description"]
         assert "instead of web_search" not in description
         assert "web_search." not in description.replace("web_search_plus", "")
+
+
+def test_old_env_notice_changes_once_the_profile_has_keys(hermes, capsys):
+    (wsp._test_plugin_dir / ".env").write_text(f"BRAVE_API_KEY={KEY}\n")
+    assert "Move each key into your Hermes profile" in _status(capsys)
+    hermes["BRAVE_API_KEY"] = "profile-key"
+    out = _status(capsys)
+    assert "Move each key into your Hermes profile" not in out
+    assert "the file is not needed; you can delete it" in out
+
+
+def test_extract_migration_message_says_nothing_was_extracted(hermes):
+    (wsp._test_plugin_dir / ".env").write_text(f"BRAVE_API_KEY={KEY}\n")
+    tools = _register()
+    message = tools["web_extract_plus"]["handler"]({"urls": ["https://example.org"]})
+    assert "nothing was extracted" in message and "nothing was searched" not in message

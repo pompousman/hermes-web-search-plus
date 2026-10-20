@@ -20,8 +20,10 @@ The same from the command line (the syntax is `hermes config set <dotted.key> <v
 
 ```bash
 hermes config set web.search_backend wsp
-hermes config set web.extract_backend wsp
+hermes config set web.extract_backend wsp   # only with an extraction key
 ```
+
+Select the extract backend only if one of your keys can extract pages (Brave, for example, only searches); otherwise every `web_extract` fails in WSP and the keyless rescue below sends the URL to anonymous services. `status` warns about that setup.
 
 This is the recommended setup once you have a search key: otherwise Hermes' own `web_search` keeps using Hermes' own backends, and Hermes' Tool Search may hide the Plus tools. `hermes web-search-plus status` and `setup` print this hint while a search provider is configured and the backend is not selected. Remember the [keyless rescue](#keyless-rescue-hermes-behavior-on-by-default) below when you select it.
 
