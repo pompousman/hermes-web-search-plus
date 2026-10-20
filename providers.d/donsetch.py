@@ -1037,7 +1037,7 @@ PROVIDER = ProviderSpec(
     env_var="DONSETCH_BIN",
     display_name="DonSeTch (local MCP)",
     description=(
-        "Local DonSeTch 3.x stdio MCP provider for metasearch, direct extraction, "
+        "Local DonSeTch (4.7.0 and newer) stdio MCP provider for metasearch, direct extraction, "
         "PDF/OCR-aware fetching, and optional browser escalation."
     ),
     config_section="donsetch",

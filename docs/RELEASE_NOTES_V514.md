@@ -5,6 +5,7 @@ The DonSeTch provider works with current DonSeTch releases again. No configurati
 ## Fixed
 
 - **DonSeTch 4.7.1 and newer.** Since 4.7.1, DonSeTch folds results for MCP clients it does not recognize into the text content (a leading `[meta] {json}` line) and drops `structuredContent`, which Web Search Plus reads. Every DonSeTch search failed with `donsetch_search_contract_failed`. Web Search Plus now starts DonSeTch with `DONSETCH_MCP__TEXT_ONLY=false`, upstream's documented opt-in for the split result. If a folded result arrives anyway, it reads the leading `[meta]` block. The tested version is now 4.10.1; 4.7.0 and newer work.
+- **DonSeTch as the only provider is named, not reported missing.** An automatic search or extraction said "No configured search provider is available" when DonSeTch was set up but, as by default, kept out of automatic routing. It now says DonSeTch is set up and how to use it: `provider="donsetch"`, or `hermes web-search-plus config set-auto-allow donsetch on`.
 - **Tests:** a leftover pre-5.1 `.env` next to the checkout (for example in a live install) no longer makes unrelated tests fail.
 
 ## Thanks

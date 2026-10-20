@@ -1116,6 +1116,26 @@ def provider_configured(provider: str, config: Dict[str, Any] = None) -> bool:
     return keyless_public_allowed(provider, config)
 
 
+def _configured_explicit_only_providers(
+    capability: str, candidates: List[str], config: Dict[str, Any]
+) -> List[str]:
+    """Configured providers for *capability* that automatic routing leaves out (auto_allow off)."""
+    from .routing import _provider_auto_allowed
+
+    auto = (config or {}).get("auto_routing") or {}
+    found = []
+    for name, spec in PROVIDER_SPECS.items():
+        if name in candidates or not getattr(spec, f"supports_{capability}", False):
+            continue
+        try:
+            if _provider_auto_allowed(name, auto) or not provider_configured(name, config):
+                continue
+        except Exception:
+            continue
+        found.append(name)
+    return found
+
+
 def add_provider_setup_guidance(
     payload: Dict[str, Any], capability: str, providers: List[str], config: Dict[str, Any],
     *, requested_provider: str = "auto",
@@ -1129,6 +1149,24 @@ def add_provider_setup_guidance(
     if not candidates or any(provider_configured(p, config) for p in candidates):
         return
     explicit = requested_provider in candidates
+    if not explicit:
+        explicit_only = _configured_explicit_only_providers(capability, candidates, config)
+        if explicit_only:
+            # Set up, but kept out of automatic routing (auto_allow off): saying
+            # "nothing is configured" made users and the model think it was missing.
+            first = explicit_only[0]
+            names = ", ".join(PROVIDER_SPECS[p].display_name for p in explicit_only)
+            allow = f"hermes web-search-plus config set-auto-allow {first} on"
+            payload.update({
+                "error": (
+                    f"No provider for automatic {'extraction' if capability == 'extract' else capability} is configured. {names} is set up but only runs "
+                    f"when asked for: call again with provider=\"{first}\", or let it join automatic routing: {allow}"
+                ),
+                "error_type": "explicit_only_provider_configured",
+                "explicit_only_providers": explicit_only,
+                "how_to_fix": [f'provider="{first}"', allow],
+            })
+            return
     preset = "self-hosted" if is_self_hosted_profile(config) else ("extract" if capability == "extract" else "starter")
     target = requested_provider if explicit else f"--preset {preset}"
     command = f"hermes web-search-plus setup {target}"
