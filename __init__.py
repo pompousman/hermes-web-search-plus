@@ -234,30 +234,43 @@ def _native_backend_hint(search_configured: bool, extract_configured: bool, nati
     Extraction is recommended only with an extraction provider: Brave and other
     search-only keys cannot read pages, and a ``wsp`` extract backend without
     one fails every call, which Hermes' keyless rescue then hands to anonymous
-    services without the user noticing.
+    services without the user noticing. With search on ``wsp`` and no extract
+    backend set, Hermes' own autodetect picks ``wsp`` for extraction too and
+    every web_extract fails, so search-only users are told to pin extraction
+    to a Hermes backend.
     """
     selected = set(native.get("native_capabilities") or [])
+    keep_hermes_extract = (
+        "`hermes config set web.extract_backend exa` (Hermes' own extraction, keyless tier; "
+        "any other Hermes extract backend works too)"
+    )
     if "extract" in selected and not extract_configured:
         return (
             "web.extract_backend is wsp, but none of your Web Search Plus keys can extract pages "
             "(Brave, for example, only searches). Every web_extract fails in WSP, and Hermes' keyless rescue "
             "then sends the URL to anonymous services. Add an extraction key "
             "(for example `hermes config set TAVILY_API_KEY <key>`) or hand extraction back to Hermes: "
-            "`hermes config set web.extract_backend \"\"`, then /reload."
+            f"{keep_hermes_extract}, then /reload."
+        )
+    if "search" in selected and not extract_configured and not native.get("extract_backend_set"):
+        return (
+            "web.search_backend is wsp and web.extract_backend is not set, so Hermes picks wsp for web_extract "
+            "as well, and none of your Web Search Plus keys can extract pages: every web_extract fails. "
+            f"Set {keep_hermes_extract}, then /reload."
         )
     if search_configured and "search" not in selected:
-        extract_part = (
-            " (and `hermes config set web.extract_backend wsp` for extraction)"
-            if extract_configured and "extract" not in selected
-            else ""
-        )
-        extract_note = (
-            "" if extract_configured
-            else " Keep Hermes' own web_extract: none of your keys can extract pages."
-        )
+        if extract_configured and "extract" not in selected:
+            extract_part = " and `hermes config set web.extract_backend wsp`"
+        elif not extract_configured and not native.get("extract_backend_set"):
+            extract_part = (
+                " and, because none of your keys can extract pages, keep extraction with Hermes: "
+                + keep_hermes_extract
+            )
+        else:
+            extract_part = ""
         return (
             "Hermes' own web_search does not use your Web Search Plus keys. To route it through them: "
-            f"`hermes config set web.search_backend wsp`{extract_part}, then /reload.{extract_note} "
+            f"`hermes config set web.search_backend wsp`{extract_part}, then /reload. "
             "Alternative: keep Hermes' search and list "
             "web_search_plus/web_extract_plus under tools.tool_search.never_defer."
         )
@@ -498,6 +511,9 @@ def _keyless_rescue_state(text: str) -> Dict[str, Any]:
     return {
         "native_selected": bool(capabilities),
         "native_capabilities": capabilities,
+        # Hermes picks an extract backend on its own when neither key is set, and with
+        # search on wsp that pick lands on wsp, which then refuses to extract.
+        "extract_backend_set": bool(str(web.get("extract_backend") or web.get("backend") or "").strip()),
         "keyless_rescue": rescue,
         "how_to_disable": _KEYLESS_RESCUE_OFF_COMMAND,
         "explanation": (

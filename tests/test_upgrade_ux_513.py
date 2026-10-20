@@ -173,7 +173,8 @@ def test_brave_user_is_told_how_to_route_hermes_search_through_wsp(hermes, capsy
     assert "`hermes config set web.search_backend wsp`" in out
     # Brave cannot extract: recommending a wsp extract backend would fail every call.
     assert "web.extract_backend wsp" not in out
-    assert "Keep Hermes' own web_extract" in out
+    # Without an extract pin Hermes' autodetect would send web_extract to wsp too.
+    assert "`hermes config set web.extract_backend exa`" in out
     assert "tools.tool_search.never_defer" in out
     assert KEY not in out
     data = json.loads(_status(capsys, "--json"))
@@ -186,7 +187,7 @@ def test_search_and_extract_keys_get_both_backend_commands(hermes, capsys):
     out = _status(capsys)
     assert "`hermes config set web.search_backend wsp`" in out
     assert "`hermes config set web.extract_backend wsp`" in out
-    assert "Keep Hermes' own web_extract" not in out
+    assert "web.extract_backend exa" not in out
 
 
 def test_wsp_extract_backend_without_an_extraction_key_is_flagged(hermes, capsys):
@@ -197,7 +198,7 @@ def test_wsp_extract_backend_without_an_extraction_key_is_flagged(hermes, capsys
     out = _status(capsys)
     assert "none of your Web Search Plus keys can extract pages" in out
     assert "keyless rescue" in out
-    assert 'hermes config set web.extract_backend ""' in out
+    assert "`hermes config set web.extract_backend exa`" in out
     assert KEY not in out
 
 
@@ -263,3 +264,19 @@ def test_extract_migration_message_says_nothing_was_extracted(hermes):
     tools = _register()
     message = tools["web_extract_plus"]["handler"]({"urls": ["https://example.org"]})
     assert "nothing was extracted" in message and "nothing was searched" not in message
+
+
+def test_search_on_wsp_without_extract_pin_and_without_extraction_key_is_flagged(hermes, capsys):
+    # Seen live: following "search_backend wsp" alone, Hermes picked wsp for web_extract
+    # too ("search-only backend and cannot extract URL content") and extraction broke.
+    hermes["BRAVE_API_KEY"] = KEY
+    wsp._test_config_yaml.write_text("web:\n  search_backend: wsp\n")
+    hint = json.loads(_status(capsys, "--json"))["native_backend_hint"]
+    assert "Hermes picks wsp for web_extract" in hint
+    assert "`hermes config set web.extract_backend exa`" in hint
+
+
+def test_search_on_wsp_with_a_hermes_extract_backend_is_fine(hermes, capsys):
+    hermes["BRAVE_API_KEY"] = KEY
+    wsp._test_config_yaml.write_text("web:\n  search_backend: wsp\n  extract_backend: exa\n")
+    assert json.loads(_status(capsys, "--json"))["native_backend_hint"] is None

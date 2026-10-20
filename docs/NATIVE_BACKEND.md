@@ -23,7 +23,7 @@ hermes config set web.search_backend wsp
 hermes config set web.extract_backend wsp   # only with an extraction key
 ```
 
-Select the extract backend only if one of your keys can extract pages (Brave, for example, only searches); otherwise every `web_extract` fails in WSP and the keyless rescue below sends the URL to anonymous services. `status` warns about that setup.
+Select `wsp` for extraction only if one of your keys can extract pages (Brave, for example, only searches); otherwise every `web_extract` fails in WSP and the keyless rescue below sends the URL to anonymous services. Do not leave `web.extract_backend` unset when search is on `wsp`: Hermes then picks `wsp` for extraction too and refuses with "search-only backend". With search-only keys keep Hermes' extraction, for example `hermes config set web.extract_backend exa` (keyless tier). `status` warns about both setups.
 
 This is the recommended setup once you have a search key: otherwise Hermes' own `web_search` keeps using Hermes' own backends, and Hermes' Tool Search may hide the Plus tools. `hermes web-search-plus status` and `setup` print this hint while a search provider is configured and the backend is not selected. Remember the [keyless rescue](#keyless-rescue-hermes-behavior-on-by-default) below when you select it.
 

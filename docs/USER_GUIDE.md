@@ -37,10 +37,11 @@ After the first install, restart Hermes once so the tools are registered (CLI: e
 
 ```bash
 hermes config set web.search_backend wsp
-hermes config set web.extract_backend wsp   # only with an extraction key (Tavily, Exa, Linkup, Firecrawl, ...)
+hermes config set web.extract_backend wsp   # with an extraction key (Tavily, Exa, Linkup, Firecrawl, ...)
+hermes config set web.extract_backend exa   # search-only keys such as Brave: keep Hermes' own extraction
 ```
 
-Run `/reload` afterwards. Select `web.extract_backend wsp` only if one of your keys can extract pages: Brave, for example, only searches. Without an extraction provider every `web_extract` fails in Web Search Plus and Hermes' keyless rescue hands the URL to anonymous services, so `status` warns about that setup. The alternative is to keep Hermes' search and list the Plus tools under `tools.tool_search.never_defer` in your Hermes `config.yaml`: `[web_search_plus, web_extract_plus]`. Web Search Plus never writes your Hermes config; `status` only reads the `web` settings (`status --json`: `native_backend_hint`).
+Run `/reload` afterwards. Always set `web.extract_backend` together with `web.search_backend wsp`: if it is not set, Hermes picks `wsp` for extraction as well. Choose `wsp` only if one of your keys can extract pages (Brave, for example, only searches); otherwise every `web_extract` fails. Keep a Hermes backend such as `exa` (keyless tier) or `tavily` instead. `status` warns about both mistakes. The alternative is to keep Hermes' search and list the Plus tools under `tools.tool_search.never_defer` in your Hermes `config.yaml`: `[web_search_plus, web_extract_plus]`. Web Search Plus never writes your Hermes config; `status` only reads the `web` settings (`status --json`: `native_backend_hint`).
 
 Smoke test from the plugin directory. The standalone script does not read `.env` files, so export the keys first:
 
