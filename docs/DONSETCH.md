@@ -1,7 +1,7 @@
 # DonSeTch local provider
 
 Web Search Plus can use [DonSeTch](https://github.com/dondai44423/donsetch)
-4.7.0 as a separately installed local provider for source-only Search and
+4.10.1 (and 4.7.0 and newer) as a separately installed local provider for source-only Search and
 Extract. DonSeTch is an independent AGPL-3.0-only project. Web Search Plus
 does not bundle, copy, or redistribute its binary.
 
@@ -16,7 +16,7 @@ routing or fallback.
 The upstream project distributes a platform binary through npm:
 
 ```bash
-npm install -g donsetch@4.7.0
+npm install -g donsetch@4.10.1
 command -v donsetch
 donsetch --version
 donsetch doctor
@@ -87,6 +87,23 @@ export DONSETCH_BIN="$(command -v donsetch)"
 Change `provider="hound"` to `provider="donsetch"`. A Hound HTTP sidecar is no
 longer read by WSP, and `HOUND_MCP_URL` has no effect in version 4.0.
 
+## Supported versions and the MCP result shape
+
+DonSeTch 4.7.0 and newer work. 4.10.1 is the tested version; `status` reports
+`tested` for it and `compatible_unverified` for any other parsed version.
+4.7.0 was verified with the same search and extract run.
+
+Since 4.7.1, DonSeTch folds results for MCP clients it does not recognize into
+`content` with a leading `[meta] {json}` line and no `structuredContent`. The
+adapter needs the structured part, so it starts DonSeTch with
+`DONSETCH_MCP__TEXT_ONLY=false` (upstream `[mcp] text_only = false`), which
+restores the split result. This value is always set by the adapter: a
+`DONSETCH_MCP__TEXT_ONLY` from your profile or environment is overridden, and
+your own DonSeTch config file is not changed. As a safety net, if a folded
+result arrives anyway, the adapter reads the leading `[meta]` line when it is a
+JSON object with a boolean `ok`; anything else is still a contract error
+(`donsetch_search_contract_failed`).
+
 ## Boundaries and attribution
 
 - DonSeTch is installed and operated separately from Web Search Plus.
@@ -99,6 +116,6 @@ longer read by WSP, and `HOUND_MCP_URL` has no effect in version 4.0.
 - In the standalone MCP package, explicit DonSeTch calls get a 195-second outer
   subprocess budget, covering the adapter's 180-second stdio timeout; other
   provider budgets remain unchanged.
-- This integration was tested against DonSeTch 4.7.0 for stdio MCP
+- This integration was tested against DonSeTch 4.10.1 and 4.7.0 for stdio MCP
   initialization, Search, Fetch, and structured error handling. Successful
   browser/anti-bot execution remains an environment-dependent open gate.

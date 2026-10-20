@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- The `donsetch` provider works with DonSeTch 4.7.1 and newer again (it failed every search with `donsetch_search_contract_failed` and parked the provider on a cooldown). Since 4.7.1 DonSeTch folds results for unrecognized MCP clients into `content` with a leading `[meta] {json}` line and drops `structuredContent`, which the adapter reads. The adapter now starts DonSeTch with `DONSETCH_MCP__TEXT_ONLY=false` (upstream's documented opt-in; it always wins over a profile value) and, if a folded result arrives anyway, reads the leading `[meta]` JSON object (strict: it must be an object with a boolean `ok`; otherwise the contract error stays). Verified with search and extract against DonSeTch 4.7.0 and 4.10.1. Thanks to @friday-cp for the detailed report and analysis (#164).
+- Tests: a leftover pre-5.1 `.env` next to the checkout (for example in a live install) no longer makes 33 unrelated tests fail through the legacy-`.env` detection.
+
+### Changed
+
+- DonSeTch `TESTED_VERSION` is now 4.10.1 (was 4.7.0); 4.7.0 and newer are documented as supported. Real 4.7.0 and 4.10.1 results are stored as test fixtures.
+
 ## [v5.1.3] — 2026-10-20
 
 ### Fixed

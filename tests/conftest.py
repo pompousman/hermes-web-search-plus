@@ -67,6 +67,23 @@ def _no_operator_credentials(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _no_legacy_env_files(request, monkeypatch):
+    """Never let a real pre-5.1 ``.env`` next to the checkout change tool behaviour.
+
+    5.1.3 looks for a leftover ``.env`` in the plugin directory and its parent and
+    switches the tools into migration-message mode while no key is configured.
+    A live install (or a developer's checkout) with such a file made dozens of
+    unrelated tests fail. test_upgrade_ux_513.py builds its own plugin directory
+    and tests the detection itself, so it keeps the real function.
+    """
+    if request.node.path.name == "test_upgrade_ux_513.py":
+        return
+    for module in list(sys.modules.values()):
+        if hasattr(module, "_legacy_env_files") and hasattr(module, "_plugin_dir"):
+            monkeypatch.setattr(module, "_legacy_env_files", lambda: [])
+
+
+@pytest.fixture(autouse=True)
 def _no_operator_donsetch(monkeypatch):
     """Never let a test find the developer's real DonSeTch binary.
 

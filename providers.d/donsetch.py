@@ -12,6 +12,11 @@ on ``structuredContent``. Transport diagnostics live under namespaced
 ``_meta`` keys (``com.donsetch/search-debug``, ``com.donsetch/fetch-debug``).
 This adapter whitelists those diagnostic fields and still accepts the older
 pre-compact structured shape so 3.2.x binaries keep working.
+
+DonSeTch >= 4.7.1 folds unrecognized clients' results into ``content`` with a
+leading ``[meta] {json}`` line and omits ``structuredContent``. The child
+environment opts back into the split shape (``DONSETCH_MCP__TEXT_ONLY=false``);
+if the fold arrives anyway, the strict ``[meta]`` fallback recovers the payload.
 """
 
 from __future__ import annotations
@@ -42,7 +47,7 @@ from wsp_sdk import (
 _ALLOWED_OUTPUT_FORMATS = {"markdown"}
 _ALLOWED_SEARCH_TYPES = {"search", "news"}
 _ALLOWED_INTENTS = {"auto", "web", "code", "paper", "news", "entity"}
-TESTED_VERSION = "4.7.0"
+TESTED_VERSION = "4.10.1"
 
 
 def _engine_credentials():
@@ -295,6 +300,11 @@ def _child_env() -> dict[str, str]:
         if value is not None:
             env[name] = value
     env["DONSETCH_TRANSPORT"] = "stdio"
+    # DonSeTch >= 4.7.1 folds results into `content` (leading `[meta] {json}`)
+    # for unrecognized clients and drops structuredContent. Opt back into the
+    # split shape ("[mcp] text_only = false" upstream). Set last so a profile or
+    # process DONSETCH_MCP__TEXT_ONLY cannot override it: the adapter depends on it.
+    env["DONSETCH_MCP__TEXT_ONLY"] = "false"
     return env
 
 
@@ -303,6 +313,29 @@ def _namespaced_meta(meta: Any, key: str) -> dict[str, Any]:
         return {}
     value = meta.get(key)
     return value if isinstance(value, dict) else {}
+
+
+_META_PREFIX = "[meta] "
+
+
+def _split_folded_meta(text: str) -> tuple[dict[str, Any], str]:
+    """Split DonSeTch's folded ``[meta] {json}`` first line from the result text.
+
+    Strict: only a leading line that parses as a JSON object carrying a boolean
+    ``ok`` counts. Anything else returns ({}, text) so the callers keep their
+    contract errors instead of guessing.
+    """
+    stripped = text.lstrip()
+    if not stripped.startswith(_META_PREFIX):
+        return {}, text
+    first, _, rest = stripped.partition("\n")
+    try:
+        meta = json.loads(first[len(_META_PREFIX):])
+    except (TypeError, ValueError):
+        return {}, text
+    if not isinstance(meta, dict) or not isinstance(meta.get("ok"), bool):
+        return {}, text
+    return meta, rest.lstrip("\n")
 
 
 def _payload_from_tool_result(result: dict[str, Any]) -> dict[str, Any]:
@@ -317,9 +350,12 @@ def _payload_from_tool_result(result: dict[str, Any]) -> dict[str, Any]:
     meta = result.get("_meta")
     if not isinstance(meta, dict):
         meta = {}
+    text = _text_content(result.get("content"))
+    if not structured:
+        structured, text = _split_folded_meta(text)
     return {
         "structured": structured,
-        "text": _text_content(result.get("content")),
+        "text": text,
         "meta": meta,
     }
 
