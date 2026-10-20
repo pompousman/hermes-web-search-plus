@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Upgrading from 5.0 no longer loses the provider key silently. A `.env` in the plugin folder or in `~/.hermes/plugins/` is still not read under Hermes (and is never opened), but `status` and `setup` now say so with the file's folder and the exact `hermes config set <KEY_NAME> <key>` command, `status --json` lists the files in the new field `legacy_env_files`, and the load log warns once. While no key is configured and such a file exists, `web_search_plus` and `web_extract_plus` stay available and answer with these steps instead of disappearing. Without a leftover `.env` nothing changes. The MCP server and standalone CLI still read `.env` files.
+
+### Changed
+
+- The `web_search_plus` tool description no longer tells the model to prefer Hermes' `web_search`; it describes web search through your configured providers and keeps the routing facts.
+- `status` and `setup` (and `status --json`, new field `native_backend_hint`) explain how to route Hermes' own `web_search`/`web_extract` through your Web Search Plus keys (`hermes config set web.search_backend wsp`, `web.extract_backend wsp`) when a provider is configured and the native backend is not selected. Nothing is written to your Hermes config.
+
 ## [v5.1.2] — 2026-10-18
 
 ### Fixed

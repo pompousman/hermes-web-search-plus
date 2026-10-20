@@ -31,6 +31,17 @@ Hermes Desktop has the same key fields under Settings > Plugins > Web Search Plu
 
 After the first install, restart Hermes once so the tools are registered (CLI: exit and start `hermes` again; gateway: `/restart`). A new or changed key applies from your next message on the gateway (Telegram, Discord, API); in the interactive CLI run `/reload` first. To switch a provider off, set its key to an empty value (`hermes config set BRAVE_API_KEY ""`): `hermes config unset` removes the line, but a key Hermes does not know by name stays active until Hermes restarts.
 
+**Upgrading from 5.0 or earlier?** Until 5.0 you could keep keys in a `.env` file in the plugin folder or in `~/.hermes/plugins/.env`. Since 5.1 those files are not read under Hermes (and Web Search Plus never opens them, not even to check what is inside). If `status` shows `! A .env file in ... is no longer read since 5.1`, open that file and store each key in your Hermes profile under the same name, for example `hermes config set BRAVE_API_KEY <key>`, then run `/reload`. Until you do, `web_search_plus` and `web_extract_plus` stay visible but answer with these steps instead of searching. `status --json` lists the files in `legacy_env_files`. The MCP server and the standalone CLI still read `.env` files as before.
+
+**Make Hermes' own `web_search` use your keys.** Hermes shows its built-in `web_search`/`web_extract` to the model by default and may hide plugin tools behind Tool Search, so the model can answer without ever calling Web Search Plus. With at least one search key configured, `status` and `setup` therefore print how to route Hermes' own tools through Web Search Plus (the native backend, [details](NATIVE_BACKEND.md)):
+
+```bash
+hermes config set web.search_backend wsp
+hermes config set web.extract_backend wsp   # optional, for page extraction
+```
+
+Run `/reload` afterwards. The alternative is to keep Hermes' search and list the Plus tools under `tools.tool_search.never_defer` in your Hermes `config.yaml`: `[web_search_plus, web_extract_plus]`. Web Search Plus never writes your Hermes config; `status` only reads the `web` settings (`status --json`: `native_backend_hint`).
+
 Smoke test from the plugin directory. The standalone script does not read `.env` files, so export the keys first:
 
 ```bash

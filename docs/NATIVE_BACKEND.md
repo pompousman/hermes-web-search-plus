@@ -16,6 +16,15 @@ web:
   extract_backend: wsp
 ```
 
+The same from the command line (the syntax is `hermes config set <dotted.key> <value>`; run `/reload` afterwards):
+
+```bash
+hermes config set web.search_backend wsp
+hermes config set web.extract_backend wsp
+```
+
+This is the recommended setup once you have a search key: otherwise Hermes' own `web_search` keeps using Hermes' own backends, and Hermes' Tool Search may hide the Plus tools. `hermes web-search-plus status` and `setup` print this hint while a search provider is configured and the backend is not selected. Remember the [keyless rescue](#keyless-rescue-hermes-behavior-on-by-default) below when you select it.
+
 For mixed routing, keep your extraction provider:
 
 ```yaml
