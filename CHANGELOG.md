@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [v5.1.3] — 2026-10-20
+
 ### Fixed
 
 - Upgrading from 5.0 no longer loses the provider key silently. A `.env` in the plugin folder or in `~/.hermes/plugins/` is still not read under Hermes (and is never opened), but `status` and `setup` now say so with the file's folder and the exact `hermes config set <KEY_NAME> <key>` command, `status --json` lists the files in the new field `legacy_env_files`, and the load log warns once. While no key is configured and such a file exists, `web_search_plus` and `web_extract_plus` stay available and answer with these steps instead of disappearing. Without a leftover `.env` nothing changes. The MCP server and standalone CLI still read `.env` files.
