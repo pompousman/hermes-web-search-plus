@@ -165,6 +165,79 @@ def _ignored_file_setting_lines(config: Optional[Mapping[str, Any]]) -> List[str
     return _warn_ignored_file_settings(dict(config or {}))
 
 
+def _plugin_dir() -> Path:
+    return Path(__file__).resolve().parent
+
+
+def _legacy_env_files() -> List[Path]:
+    """``.env`` files that Web Search Plus <= 5.0 read and 5.1+ no longer reads under Hermes.
+
+    The old loader looked in the plugin directory and in its parent
+    (``$HERMES_HOME/plugins``). Existence only: the files are never opened, so
+    their keys cannot leak. Empty outside Hermes: the MCP server and standalone
+    CLI still load ``.env`` files.
+    """
+    if file_credentials_allowed():
+        return []
+    plugin_dir = _plugin_dir()
+    found: List[Path] = []
+    for path in (plugin_dir / ".env", plugin_dir.parent / ".env"):
+        try:
+            if os.path.isfile(path) and path not in found:
+                found.append(path)
+        except OSError:
+            continue
+    return found
+
+
+def _display_path(path: Path) -> str:
+    text = str(path)
+    home = str(Path.home())
+    return "~" + text[len(home):] if home not in ("", "/") and (text == home or text.startswith(home + os.sep)) else text
+
+
+def _legacy_env_lines() -> List[str]:
+    """Status lines for a pre-5.1 ``.env`` that is no longer read (never its content)."""
+    return [
+        f"A .env file in {_display_path(path.parent)} is no longer read since 5.1. "
+        "Move each key into your Hermes profile: `hermes config set BRAVE_API_KEY <key>` "
+        "(same name for every key in that file), then /reload."
+        for path in _legacy_env_files()
+    ]
+
+
+def _legacy_env_tool_error(tool: str) -> str:
+    """Model-readable error for a tool call when the only keys sit in a pre-5.1 ``.env``."""
+    where = ", ".join(_display_path(path) for path in _legacy_env_files())
+    return (
+        f"{tool} error: no provider key is available. Keys from the old .env file ({where}) "
+        "are not read since Web Search Plus 5.1, so nothing was searched. Tell the user to move each key "
+        "into their Hermes profile with `hermes config set BRAVE_API_KEY <key>` "
+        "(same name for every key in that file), then run /reload."
+    )
+
+
+def _native_backend_hint(search_configured: bool, extract_configured: bool, native: Mapping[str, Any]) -> Optional[str]:
+    """How to route Hermes' own web_search/web_extract through the user's WSP keys, or None.
+
+    Only from the web settings the status already reads; never changes them.
+    """
+    selected = set(native.get("native_capabilities") or [])
+    if search_configured and "search" not in selected:
+        return (
+            "Hermes' own web_search does not use your Web Search Plus keys. To route it through them: "
+            "`hermes config set web.search_backend wsp` (and `hermes config set web.extract_backend wsp` "
+            "for extraction), then /reload. Alternative: keep Hermes' search and list "
+            "web_search_plus/web_extract_plus under tools.tool_search.never_defer."
+        )
+    if extract_configured and "extract" not in selected:
+        return (
+            "Hermes' own web_extract does not use your Web Search Plus keys. To route it through them: "
+            "`hermes config set web.extract_backend wsp`, then /reload."
+        )
+    return None
+
+
 def _provider_config_status(env: Optional[Mapping[str, str]] = None, config: Optional[Mapping[str, Any]] = None) -> Dict[str, Any]:
     """Describe configured providers by capability tier.
 
@@ -986,15 +1059,21 @@ def _status_payload(
 ) -> Dict[str, Any]:
     active_env = env if env is not None else _credential_env()
     active_config = dict(config or _default_behavior_config())
+    providers = _provider_config_status(active_env, active_config)
+    hermes_native = _hermes_keyless_rescue_state(hermes_config_path)
     return {
-        "providers": _provider_config_status(active_env, active_config),
+        "providers": providers,
         "profile": _profile_status(active_config, active_env),
         "routing": redact_secrets(active_config),
         "ignored_file_keys": _ignored_file_credential_lines(raw_config if raw_config is not None else active_config),
         "ignored_file_settings": _ignored_file_setting_lines(raw_config if raw_config is not None else active_config),
         "donsetch": _donsetch_status(active_env, active_config),
         "jev": jev_setup.status_payload(active_env, active_config),
-        "hermes_native": _hermes_keyless_rescue_state(hermes_config_path),
+        "hermes_native": hermes_native,
+        "legacy_env_files": [str(path) for path in _legacy_env_files()],
+        "native_backend_hint": _native_backend_hint(
+            bool(providers.get("search_configured")), bool(providers.get("extract_configured")), hermes_native
+        ),
     }
 
 
@@ -1509,6 +1588,10 @@ def _web_search_plus_cli_command(args: Any) -> None:
             print("\n" + _routing_summary(config))
             for notice in [*(payload.get("ignored_file_keys") or []), *(payload.get("ignored_file_settings") or [])]:
                 print("  ! " + notice)
+            for notice in _legacy_env_lines():
+                print("  ! " + notice)
+            if payload.get("native_backend_hint"):
+                print("\n" + payload["native_backend_hint"])
             print("\n" + "\n".join(_render_keyless_rescue(payload["hermes_native"])))
             if desktop:
                 print("  from Hermes Desktop settings: " + ", ".join(sorted(desktop)))
@@ -1558,6 +1641,15 @@ def _web_search_plus_cli_command(args: Any) -> None:
         raw_for_notices = _raw_config_json(config_path)
         for notice in [*_ignored_file_credential_lines(raw_for_notices), *_ignored_file_setting_lines(raw_for_notices)]:
             print("  ! " + notice)
+        for notice in _legacy_env_lines():
+            print("  ! " + notice)
+        setup_providers = _provider_config_status(env_now, config)
+        setup_hint = _native_backend_hint(
+            bool(setup_providers.get("search_configured")), bool(setup_providers.get("extract_configured")),
+            _hermes_keyless_rescue_state(),
+        )
+        if setup_hint:
+            print("\n" + setup_hint)
         if getattr(args, "jev", False):
             want_jev = True
         elif getattr(args, "no_jev", False):
@@ -2417,8 +2509,8 @@ def register(ctx: Any) -> None:
     schema = {
         "name": "web_search_plus",
         "description": (
-            "Source search with filters, freshness and research mode. "
-            "Use it instead of web_search when you need domain filters, freshness or research mode. "
+            "Web search through your configured providers. "
+            "Supports domain filters, freshness and research mode. "
             "Automatic routing by query type: "
             "Brave first for general, news, local and community queries, "
             "Exa for docs and academic queries, Serper for security and shopping queries; "
@@ -2570,6 +2662,8 @@ def register(ctx: Any) -> None:
                 cache_ttl = int(cache_ttl)
             except (TypeError, ValueError, OverflowError):
                 cache_ttl = None
+        if _legacy_env_only():
+            return _legacy_env_tool_error("Search")
         count = _clean_tool_count(count)
         provider, provider_error = _clean_tool_provider(provider)
         if provider_error:
@@ -2600,17 +2694,33 @@ def register(ctx: Any) -> None:
             data = {**data, **trace, "elapsed_ms": int((time.monotonic() - started) * 1000)}
         return _format_results(data)
 
-    def check_fn() -> bool:
+    def search_configured() -> bool:
         if any(get_secret(k) for k in _PROVIDER_ENV_KEYS) or any(
                 _keyless_public_opted_in(p) for p in _KEYLESS_PROVIDER_IDS):
             return True
         return _config_provider_configured(list(SEARCH_PROVIDER_IDS))
 
-    def extract_check_fn() -> bool:
+    def extract_configured() -> bool:
         if any(get_secret(k) for k in _EXTRACT_PROVIDER_ENV_KEYS) or any(
                 _keyless_public_opted_in(p) for p in _KEYLESS_EXTRACT_PROVIDER_IDS):
             return True
         return _config_provider_configured(list(EXTRACT_PROVIDER_IDS))
+
+    def _legacy_env_only() -> bool:
+        """No provider configured, but a pre-5.1 .env (no longer read) exists: tools answer with the migration steps."""
+        return bool(_legacy_env_files()) and not search_configured() and not extract_configured()
+
+    def check_fn() -> bool:
+        return search_configured() or _legacy_env_only()
+
+    def extract_check_fn() -> bool:
+        return extract_configured() or _legacy_env_only()
+
+    try:
+        if _legacy_env_only():
+            logger.warning("web-search-plus: %s", " ".join(_legacy_env_lines()))
+    except Exception as exc:  # never break registration over a hint
+        logger.debug("web-search-plus: legacy .env check skipped: %s", type(exc).__name__)
 
     ctx.register_tool(
         name="web_search_plus",
@@ -2669,6 +2779,8 @@ def register(ctx: Any) -> None:
             urls = args_or_urls
         if isinstance(urls, str):
             urls = [urls]
+        if _legacy_env_only():
+            return _legacy_env_tool_error("Extract")
         provider, provider_error = _clean_tool_extract_provider(provider)
         if provider_error:
             return provider_error
